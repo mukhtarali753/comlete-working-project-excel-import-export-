@@ -1,0 +1,1 @@
+<img src="{{asset('logo/logo-og-600x350.jpg')}}" width="100px" >
