@@ -6,6 +6,8 @@
                 <!-- Logo -->
                 <div class="shrink-0 flex items-center">
                     <a href="{{ route('dashboard') }}">
+                        
+
                         <x-application-logo class="block h-10 w-auto fill-current text-gray-600" />
                     </a>
                 </div>
@@ -15,7 +17,34 @@
                     <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
                         {{ __('Themes') }}
                     </x-nav-link>
+                
+                   
+                    
+                    <div class="hidden sm:flex space-x-8 sm:-my-px sm:ml-10">
+                        <button style="color: black"  >
+                        
+                        <a href="{{ route('showboard') }}" class="{{ request()->routeIs('showboard') ? 'active' : '' }}"> Board</a>
+       
+
+                    </button>
+                    </div>
+
+                    {{-- <button>
+                         <a href="{{ route('leads.index') }}">Leads</a>
+                    </button> --}}
+                    <button>
+                    <a href="{{ route('leads.create') }}">
+                    Lead
+                     </a>
+                     </button>
+
+
+                     
+                   
+                    
+                    
                 </div>
+                
             </div>
 
             <!-- Settings Dropdown -->
@@ -46,12 +75,13 @@
                         </form>
                     </x-slot>
                 </x-dropdown> --}}
+                
                 <form action="{{ route('logout') }}" method="POST">
                     @csrf
                     {{-- <button class="btn btn-success " onclick="event.preventDefault(); this.closest('form').submit();">Logout</button> --}}
                     {{-- <button style="color: black; background-color: gray; border: none; padding: 8px 16px;" onclick="event.preventDefault(); this.closest('form').submit();">Logout</button> --}}
                     {{-- <button style="color: white; background-color: black; border: 10px solid white; padding: 8px 16px;" onclick="event.preventDefault(); this.closest('form').submit();">Logout</button> --}}
-                    <button style="color: white; background-color: black; border: 10px solid white; border-radius: 20px; padding: 8px 16px;" onclick="event.preventDefault(); this.closest('form').submit();">Logout</button>
+                    <button style="color: white; background-color: black; border: 10px solid white; border-radius: 20px; padding: 4px 12px;" onclick="event.preventDefault(); this.closest('form').submit();">Logout</button>
 
                 </form>
                 
@@ -80,8 +110,12 @@
         <!-- Responsive Settings Options -->
         <div class="pt-4 pb-1 border-t border-gray-200">
             <div class="px-4">
-                <div class="font-medium text-base text-gray-800">{{ Auth::user()->name }}</div>
-                <div class="font-medium text-sm text-gray-500">{{ Auth::user()->email }}</div>
+                {{-- <div class="font-medium text-base text-gray-800">{{ Auth::user()->name }}</div>
+                <div class="font-medium text-sm text-gray-500">{{ Auth::user()->email }}</div> --}}
+
+                <div class="font-medium text-base text-gray-800">{{ Auth::check() ? Auth::user()->name : '' }}</div>
+                <div class="font-medium text-sm text-gray-500">{{ Auth::check() ? Auth::user()->email : '' }}</div>
+
             </div>
 
             <div class="mt-3 space-y-1">
@@ -99,3 +133,8 @@
         </div>
     </div>
 </nav>
+<!-- jQuery CDN (if not already loaded in layout) -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+<!-- Script to dynamically add stage rows -->
+

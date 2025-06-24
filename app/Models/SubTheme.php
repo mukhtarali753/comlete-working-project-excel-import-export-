@@ -13,6 +13,7 @@ class SubTheme extends Model
         'theme_id',
         'title',
         'description',
+        'body',
     ];
 
     public function blocks()
@@ -22,4 +23,6 @@ class SubTheme extends Model
     public function theme(){
         return $this->belongsTo(Theme::class,'theme_id');
     }
+
+     
 }

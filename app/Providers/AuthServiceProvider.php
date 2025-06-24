@@ -23,8 +23,12 @@ class AuthServiceProvider extends ServiceProvider
      */
     public function boot()
     {
-        $this->registerPolicies();
-
-        //
+        gate::define('admin', function ($user) {
+            if($user->email == 'israr@gmail.com'){
+                return true;
+            }else{
+                return false;
+            }
+        });
     }
 }

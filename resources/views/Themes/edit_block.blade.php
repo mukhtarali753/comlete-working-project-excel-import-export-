@@ -18,8 +18,33 @@
                 <label>Description</label>
                 <textarea name="description" class="form-control">{{ $block->description }}</textarea>
             </div>
+
+            <div class="mb-3">
+                <label>Body</label>
+                <textarea name="body" class="form-control" id="editor">{{ $block->body}}</textarea>
+            </div>
+
+            <script>
+                Jodit.make('#editor', {
+                    uploader: {
+                        url: '/upload-image', 
+                        insertImageAsBase64URI: false
+                    },
+                    
+                    buttons: [
+                        'bold', 'italic', 'underline', '|', 'ul', 'ol', 'image', 'video', '|', 'undo', 'redo', 'source'
+                    ],
+                    iframe: false,
+                    safeMode: false,
+                    allowTags: '*',
+                    cleanHTML: false
+                });
+            </script>
+
             <button type="submit" class="btn btn-success">Update</button>
         </form>
     </div>
 </div>
 @endsection
+
+

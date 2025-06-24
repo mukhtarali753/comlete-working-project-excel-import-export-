@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Theme;
 use App\Models\ThemeBlock;
 use Illuminate\Http\Request;
-
+ 
 class ThemeController extends Controller
 {
     public function index()
@@ -18,15 +18,26 @@ class ThemeController extends Controller
         // return view('Themes.index', compact('themes','id'));
 
 
-        // $themes = Theme::where('parent_id',0)->orWhere('parent_id',null)->get();
+        
         // $id = 0;
         // return view('themes.index',compact('themes','id'));
-        $themes = Theme::whereIn('parent_id', [0, null])->get();
+        // $themes = Theme::whereIn('parent_id', [0, null])->get();
+
+    //  $themes = Theme::where('user_id', auth()->user()->id)->where('parent_id',0)->Where('parent_id',null)->get();
        
-        $id = 0;
+    //     $id = 0;
 
         
-        return view('themes.index', compact('themes', 'id'));
+    //     return view('themes.index', compact('themes', 'id'));
+
+    $themes = Theme::where('user_id', auth()->id())
+               ->where('parent_id', 0)
+               ->orWhere('parent_id', null)
+               ->get();
+
+               $id = 0;
+               return view('themes.index', compact('themes', 'id'));
+
 
         
 
@@ -74,7 +85,17 @@ class ThemeController extends Controller
             'parent_id' => 'sometimes',
         ]);
 
-        Theme::create($request->all());
+        // Theme::create($request->all());
+        // $themes = ['user_id' => auth()->user()->id];
+        // $themes = Theme::create($themes);
+        
+        // dd(auth()->id());
+        Theme::create([
+            'title' => $request->title, 
+            'description' => $request->description,
+            'parent_id' => $request->parent_id ?? 0,
+            'user_id' => auth()->id(),
+        ]);
 
         if($request->parent_id == 0){
             return redirect()->route('themes.index')->with('success', 'Theme created successfully.');
@@ -98,17 +119,17 @@ class ThemeController extends Controller
     // }
 
     public function show($id)
-{
-   
-    $themes = Theme::where('parent_id',  $id)->get();
+    {
+        $themes = Theme::where('parent_id',  $id)->get();
+        $blocks = ThemeBlock::where('theme_id', $id)->get();
+        return view('themes.index', compact('themes', 'blocks', 'id'));
+    }
+    public function showTheme($id)
+    {
+        $theme = Theme::with('blocks')->where('id',  $id)->first();
+        return view('themes.show', compact('theme', 'id'));
+    }
 
-
-   
-    $blocks = ThemeBlock::where('theme_id', $id)->get();
-    
-   
-    return view('themes.index', compact('themes', 'blocks', 'id'));
-}
 
 
     public function edit($id)
@@ -117,6 +138,9 @@ class ThemeController extends Controller
         
         return view('themes.edit', compact('themes'));
     }
+
+
+
 
     public function update(Request $request, $id)
     {
@@ -131,6 +155,8 @@ class ThemeController extends Controller
         return redirect()->route('themes.index')->with('success', 'Theme updated successfully.');
     }
 
+    
+
     public function destroy($id)
     {
         $theme = Theme::findOrFail($id);
@@ -143,18 +169,22 @@ class ThemeController extends Controller
     {
 
         
-        // dd($request,$themeId);
+        // dd($request->all());
         $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
+            'body' => 'nullable|string',
+            
         ]);
     
         ThemeBlock::create([
             'theme_id' => $themeId,
             'title' => $request->title,
             'description' => $request->description,
+          'body' => $request->body ?? '',
+          
         ]);
-
+        
         // Themeblock::create($request->all());
     
         return redirect()->route('themes.show', $themeId)->with('success', 'Sub-theme block created successfully.');
@@ -165,6 +195,22 @@ class ThemeController extends Controller
         $block = ThemeBlock::findOrFail($id);
         return view('themes.edit_block', compact('block'));
     }
+
+
+    public function showSingleBlock($id)
+{
+   
+    $block = ThemeBlock::with('theme')->find($id);
+    return view('themes.single_block', compact('block'));
+}
+
+    // public function showThemeblock($id)
+    // {
+    //     $theme = Theme::with('blocks')->where('id',  $id)->first();
+    //     return view('themes.showblock', compact('theme', 'id'));
+    // }
+    
+
 
     public function updateBlock(Request $request, $id)
     {

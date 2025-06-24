@@ -9,7 +9,7 @@ class ThemeBlock extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['theme_id', 'title', 'description'];
+    protected $fillable = ['theme_id', 'title', 'description', 'body'];
     
 
     

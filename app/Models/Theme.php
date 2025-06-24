@@ -9,12 +9,12 @@ class Theme extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['title', 'description', 'parent_id'];
+    protected $guarded = [];
 
-    // public function blocks()
-    // {
-    //     return $this->hasMany(ThemeBlock::class);
-    // }
+    public function blocks()
+    {
+        return $this->hasMany(ThemeBlock::class);
+    }
 
     public function subthemes()
     {

@@ -22,7 +22,7 @@
                     @auth
                         <!-- Dashboard Link for Authenticated Users -->
                         <div class="text-center">
-                            <a href="{{ url('/dashboard') }}" class="text-sm text-gray-700 dark:text-gray-500 underline">Go to Dashboard</a>
+                            <a href="{{ url('/dashboard') }}" class="text-sm text-gray-700 dark:text-gray-500 underline">Go To Theme Dashboard</a>
                         </div>
                     @else
                         <!-- Login Form --> 
@@ -43,6 +43,8 @@
                         @if (Route::has('register'))
                             <div class="mt-4 text-center">
                                 <a href="{{ route('register') }}" class="text-sm text-blue-600 hover:underline">Don't have an account? Register</a>
+                                <a href="{{ route('password.request') }}" class="text-sm text-blue-600 hover:underline">Forgot password</a>
+
                             </div>
                         @endif
                     @endauth
