@@ -46,6 +46,7 @@
                                         data-lead-id="{{ $lead->id }}">
                                         <span class="btn btn-light">⋮⋮</span>
                                         <span>{{ $lead->name }}</span>
+                                        
                                         <form action="{{ route('leads.destroy', $lead->id) }}" method="POST" onsubmit="return confirm('Are you sure?')" style="display:inline;">
                                             @csrf
                                             @method('DELETE')

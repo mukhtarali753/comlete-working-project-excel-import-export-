@@ -21,6 +21,7 @@
     },
     "dependencies": {
         "bootstrap": "^5.3.3",
-        "jodit": "^4.6.2"
+        "jodit": "^4.6.2",
+        "xlsx": "^0.18.5"
     }
 }

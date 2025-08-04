@@ -18,7 +18,7 @@ class checkage
     {
 
         if ($request->age && $request->age >18){
-            return redirect()->route('home');
+            return redirect()->route('dashboard');
         }
         return $next($request);
     }

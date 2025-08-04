@@ -20,7 +20,7 @@ class CreateSubThemesTable extends Migration
             $table->string('title');
             $table->text('description')->nullable();
             $table->timestamps();
-            $table->foreign('subtheme_id')->references('id')->on('sub_themes')->onDelete('cascade');
+            // $table->foreign('subtheme_id')->references('id')->on('sub_themes')->onDelete('cascade');
         
         });
     }
