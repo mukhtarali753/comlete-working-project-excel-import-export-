@@ -128,7 +128,7 @@ class SheetController extends Controller
     {
         $files = File::select('id', 'name')
             ->withCount('sheets')
-            ->get();
+            ->get(); 
 
         return response()->json(['files' => $files]);
     }
@@ -189,5 +189,8 @@ class SheetController extends Controller
         return response()->json(['message' => 'Failed to delete sheet: ' . $e->getMessage()], 500);
     }
 }
+
+    
+
 
 }

@@ -18,18 +18,17 @@
                     <i class="fas fa-save"></i> Save Data
                 </button>
 
-                <div class="dropdown">
-                    <button class="btn btn-sm btn-primary dropdown-toggle" type="button" id="exportDropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                        <i class="fas fa-file-export fa-sm"></i> Export
-                    </button>
-                    <div class="dropdown-menu dropdown-menu-right" aria-labelledby="exportDropdown">
+                    <button id="exportBtn" class="btn btn-sm btn-primary">
+                       <i class="fas fa-file-export fa-sm"></i> Export
+                       </button>
+                    {{-- <div class="dropdown-menu dropdown-menu-right" aria-labelledby="exportDropdown">
                         <button id="exportXlsxBtn" class="dropdown-item" type="button">
                             <i class="fas fa-file-excel text-success"></i> Excel (.xlsx)
                         </button>
                         <button id="exportCsvBtn" class="dropdown-item" type="button">
                             <i class="fas fa-file-csv text-info"></i> CSV (.csv)
                         </button>
-                    </div>
+                    </div> --}}
                 </div>
             </div>
         </div>
@@ -44,6 +43,9 @@
 
 {{-- CSRF token --}}
 <meta name="csrf-token" content="{{ csrf_token() }}">
+
+{{-- Bootstrap JS (required for dropdowns) --}}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
 
 {{-- Luckysheet and dependencies --}}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/css/pluginsCss.css" />
@@ -177,36 +179,49 @@ $(document).ready(function() {
         });
     });
 
-    $('#exportXlsxBtn').on('click', () => exportSheet('xlsx'));
-    $('#exportCsvBtn').on('click', () => exportSheet('csv'));
+    // $('#exportXlsxBtn').on('click', () => exportSheet('xlsx'));
+    // $('#exportCsvBtn').on('click', () => exportSheet('csv'));
 
-    function exportSheet(type) {
-        const sheet = luckysheet.getSheet();
-        const exportData = sheet.data.map(row =>
-            row ? row.map(cell => cell?.v || "") : []
-        );
+    // function exportSheet(type) {
+    //     const sheet = luckysheet.getSheet();
+    //     const exportData = sheet.data.map(row =>
+    //         row ? row.map(cell => cell?.v || "") : []
+    //     );
 
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet(exportData);
-        XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
+    //     const wb = XLSX.utils.book_new();
+    //     const ws = XLSX.utils.aoa_to_sheet(exportData);
+    //     XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
 
-        const fileName = $('#fileNameInput').val().trim() || 'export';
+    //     const fileName = $('#fileNameInput').val().trim() || 'export';
 
-        if (type === 'csv') {
-            const csv = XLSX.utils.sheet_to_csv(ws);
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            saveAs(blob, `${fileName}.csv`);
-        } else {
-            XLSX.writeFile(wb, `${fileName}.xlsx`);
-        }
-    }
+    //     if (type === 'csv') {
+    //         const csv = XLSX.utils.sheet_to_csv(ws);
+    //         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    //         saveAs(blob, `${fileName}.csv`);
+    //     } else {
+    //         XLSX.writeFile(wb, `${fileName}.xlsx`);
+    //     }
+    // }
+
+
+    $('#exportBtn').on('click', function() {
+    const sheet = luckysheet.getSheet();
+    const exportData = sheet.data.map(row =>
+        row ? row.map(cell => cell?.v || "") : []
+    );
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(exportData);
+    XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
+
+    const fileName = $('#fileNameInput').val().trim() || 'export';
+    XLSX.writeFile(wb, `${fileName}.xlsx`);
+});
 
     // Add delete functionality
     $(document).on('click', '.delete-sheet', function() {
-        
         const sheetId = $(this).data('sheet-id');
         if (confirm('Are you sure you want to delete this sheet?')) {
-          
             $.ajax({
                 url: `/sheets/${sheetId}`,
                 type: 'DELETE',
@@ -256,4 +271,4 @@ $(document).ready(function() {
     }
 }
 </style>
-@endsection
+@endsectionclear

@@ -92,3 +92,4 @@ class BusinessController extends Controller
         return view('file.preview', compact('files'));
     }
 }
+        
