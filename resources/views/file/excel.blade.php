@@ -253,19 +253,27 @@ $(document).ready(function() {
     });
 
     // Export button handler
-    $('#exportBtn').on('click', function() {
-        const sheet = luckysheet.getSheet();
-        const exportData = sheet.data.map(row =>
+  // Export button handler - exports all sheets to a single Excel file
+$('#exportBtn').on('click', function() {
+    const allSheets = luckysheet.getAllSheets();
+    const wb = XLSX.utils.book_new();
+    
+    // Process each sheet
+    allSheets.forEach(sheet => {
+        // Get the sheet data and convert to 2D array
+        const sheetData = sheet.data.map(row => 
             row ? row.map(cell => cell?.v || "") : []
         );
-
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet(exportData);
-        XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
-
-        const fileName = $('#fileNameInput').val().trim() || 'export';
-        XLSX.writeFile(wb, `${fileName}.xlsx`);
+        
+        // Create worksheet and add to workbook
+        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+        XLSX.utils.book_append_sheet(wb, ws, sheet.name || `Sheet${sheet.order + 1}`);
     });
+    
+    // Generate file name and download
+    const fileName = $('#fileNameInput').val().trim() || 'export';
+    XLSX.writeFile(wb, `${fileName}.xlsx`);
+});
 });
 </script>
 
