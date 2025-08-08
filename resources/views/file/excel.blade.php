@@ -116,7 +116,7 @@ $(document).ready(function() {
             userMenuItem: []
         });
 
-        // Add custom context menu for sheet deletion
+        // Add custom context menu for sheet deletion now a add delete are working
         luckysheet.setConfig({
             hook: {
                 onToggleSheetMenu: function(menu) {
