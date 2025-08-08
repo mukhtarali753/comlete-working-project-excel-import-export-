@@ -186,7 +186,7 @@ Route::controller(SheetController::class)->group(function () {
     Route::get('/sheet/{sheet}/data', 'getSheetData')->name('sheet.data');
     Route::get('/files/{id}/sheets', 'getSheetsByFile');
     Route::delete('/sheets/{id}', 'deleteSheet')->name('sheets.delete');
-     Route::get('/export/{file}/{type}', 'export')->name('sheets.export');
+    Route::get('/export/{file}/{type}', 'export')->name('sheets.export');
 });
 
 

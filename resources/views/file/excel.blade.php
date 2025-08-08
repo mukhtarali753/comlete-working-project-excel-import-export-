@@ -17,19 +17,9 @@
                 <button id="saveSheetBtn" class="btn btn-sm btn-success">
                     <i class="fas fa-save"></i> Save Data
                 </button>
-
-                    <button id="exportBtn" class="btn btn-sm btn-primary">
-                       <i class="fas fa-file-export fa-sm"></i> Export
-                       </button>
-                    {{-- <div class="dropdown-menu dropdown-menu-right" aria-labelledby="exportDropdown">
-                        <button id="exportXlsxBtn" class="dropdown-item" type="button">
-                            <i class="fas fa-file-excel text-success"></i> Excel (.xlsx)
-                        </button>
-                        <button id="exportCsvBtn" class="dropdown-item" type="button">
-                            <i class="fas fa-file-csv text-info"></i> CSV (.csv)
-                        </button>
-                    </div> --}}
-                </div>
+                <button id="exportBtn" class="btn btn-sm btn-primary">
+                    <i class="fas fa-file-export fa-sm"></i> Export
+                </button>
             </div>
         </div>
 
@@ -60,7 +50,6 @@
 $(document).ready(function() {
     const initialSheets = @json($sheets ?? []);
     const fileId = @json($file->id ?? null);
-    console.log('initialSheets:', initialSheets); // Debug initialSheets
 
     // Function to create a blank sheet
     function createBlankSheet(rows = 16, cols = 26) {
@@ -78,21 +67,41 @@ $(document).ready(function() {
             order: 0,
             status: 1,
             celldata: [],
-            __isNew: false
+            __isNew: true
         };
     }
 
-    // Function to initialize Luckysheet with custom settings to avoid demo
+    // Function to initialize Luckysheet with custom settings
     function initializeLuckysheet(sheets) {
         if (!Array.isArray(sheets) || sheets.length === 0) {
             console.warn('No valid sheets provided, creating a blank sheet');
             sheets = [createBlankSheet()];
         }
 
-        luckysheet.destroy(); // Destroy existing instance to clear cache
+        // Format sheets data to include IDs if they exist
+        const formattedSheets = sheets.map(sheet => {
+            const sheetData = {
+                name: sheet.name,
+                data: Array.isArray(sheet.data) ? sheet.data : JSON.parse(sheet.data),
+                order: sheet.order,
+                status: 1,
+                config: {
+                    rowlen: {},
+                    columnlen: {}
+                }
+            };
+            
+            if (sheet.id) {
+                sheetData.id = sheet.id;
+            }
+            
+            return sheetData;
+        });
+
+        luckysheet.destroy();
         luckysheet.create({
             container: 'luckysheet',
-            data: sheets,
+            data: formattedSheets,
             showinfobar: false,
             showtoolbar: false,
             showstatisticBar: false,
@@ -106,10 +115,60 @@ $(document).ready(function() {
             userInfo: null,
             userMenuItem: []
         });
+
+        // Add custom context menu for sheet deletion
+        luckysheet.setConfig({
+            hook: {
+                onToggleSheetMenu: function(menu) {
+                    menu.push({
+                        name: "Delete Sheet",
+                        onclick: function() {
+                            const index = luckysheet.getSheetIndex();
+                            deleteSheet(index);
+                        }
+                    });
+                    return menu;
+                }
+            }
+        });
     }
 
+    // Function to handle sheet deletion
+    function deleteSheet(sheetIndex) {
+        const allSheets = luckysheet.getAllSheets();
+        const sheetToDelete = allSheets[sheetIndex];
+        
+        if (!confirm(`Are you sure you want to delete "${sheetToDelete.name}"?`)) {
+            return;
+        }
+
+        // If the sheet exists in the database (has an ID), send delete request
+        if (sheetToDelete.id && fileId) {
+            $.ajax({
+                url: `/sheets/${sheetToDelete.id}`,
+                type: 'DELETE',
+                headers: {
+                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                },
+                success: function(response) {
+                    // Remove the sheet from Luckysheet
+                    luckysheet.deleteSheet(sheetIndex);
+                    alert(response.message);
+                },
+                error: function(xhr) {
+                    alert('Failed to delete sheet: ' + (xhr.responseJSON?.message || xhr.statusText));
+                }
+            });
+        } else {
+            // For new sheets not yet saved to database
+            luckysheet.deleteSheet(sheetIndex);
+        }
+    }
+
+    // Initialize Luckysheet
     initializeLuckysheet(initialSheets);
 
+    // Add new sheet button handler
     $('#addNewSheetBtn').on('click', function() {
         window.sheetCount = window.sheetCount || initialSheets.length;
         window.sheetCount++;
@@ -147,6 +206,7 @@ $(document).ready(function() {
         luckysheet.setSheetActive(allSheets.length - 1);
     });
 
+    // Save data button handler
     $('#saveSheetBtn').on('click', function() {
         const allSheets = luckysheet.getAllSheets();
         const fileName = $('#fileNameInput').val().trim() || `sheet_${new Date().toISOString().slice(0,10)}`;
@@ -159,7 +219,8 @@ $(document).ready(function() {
                 sheets: allSheets.map(sheet => ({
                     name: sheet.name,
                     data: JSON.stringify(sheet.data),
-                    order: sheet.order
+                    order: sheet.order,
+                    id: sheet.id || null
                 })),
                 file_id: fileId || null
             }),
@@ -172,6 +233,18 @@ $(document).ready(function() {
                 if (!fileId && response.file_id) {
                     window.history.replaceState({}, '', `/excel-preview/${response.file_id}`);
                 }
+                
+                // Update sheet IDs if they were created
+                if (response.sheets) {
+                    const updatedSheets = luckysheet.getAllSheets().map((sheet, index) => {
+                        if (sheet.__isNew && response.sheets[index]) {
+                            sheet.id = response.sheets[index].id;
+                            delete sheet.__isNew;
+                        }
+                        return sheet;
+                    });
+                    initializeLuckysheet(updatedSheets);
+                }
             },
             error: function(xhr) {
                 alert('Failed to save: ' + (xhr.responseJSON?.message || xhr.statusText));
@@ -179,69 +252,19 @@ $(document).ready(function() {
         });
     });
 
-    // $('#exportXlsxBtn').on('click', () => exportSheet('xlsx'));
-    // $('#exportCsvBtn').on('click', () => exportSheet('csv'));
-
-    // function exportSheet(type) {
-    //     const sheet = luckysheet.getSheet();
-    //     const exportData = sheet.data.map(row =>
-    //         row ? row.map(cell => cell?.v || "") : []
-    //     );
-
-    //     const wb = XLSX.utils.book_new();
-    //     const ws = XLSX.utils.aoa_to_sheet(exportData);
-    //     XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
-
-    //     const fileName = $('#fileNameInput').val().trim() || 'export';
-
-    //     if (type === 'csv') {
-    //         const csv = XLSX.utils.sheet_to_csv(ws);
-    //         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    //         saveAs(blob, `${fileName}.csv`);
-    //     } else {
-    //         XLSX.writeFile(wb, `${fileName}.xlsx`);
-    //     }
-    // }
-
-
+    // Export button handler
     $('#exportBtn').on('click', function() {
-    const sheet = luckysheet.getSheet();
-    const exportData = sheet.data.map(row =>
-        row ? row.map(cell => cell?.v || "") : []
-    );
+        const sheet = luckysheet.getSheet();
+        const exportData = sheet.data.map(row =>
+            row ? row.map(cell => cell?.v || "") : []
+        );
 
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(exportData);
-    XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(exportData);
+        XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
 
-    const fileName = $('#fileNameInput').val().trim() || 'export';
-    XLSX.writeFile(wb, `${fileName}.xlsx`);
-});
-
-    // Add delete functionality
-    $(document).on('click', '.delete-sheet', function() {
-        const sheetId = $(this).data('sheet-id');
-        if (confirm('Are you sure you want to delete this sheet?')) {
-            $.ajax({
-                url: `/sheets/${sheetId}`,
-                type: 'DELETE',
-                headers: {
-                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
-                },
-                success: function(response) {
-                    alert(response.message);
-                    // Refresh sheets after deletion
-                    if (fileId) {
-                        $.get(`/files/${fileId}/sheets`, function(data) {
-                            initializeLuckysheet(data);
-                        });
-                    }
-                },
-                error: function(xhr) {
-                    alert('Failed to delete sheet: ' + xhr.responseJSON?.message);
-                }
-            });
-        }
+        const fileName = $('#fileNameInput').val().trim() || 'export';
+        XLSX.writeFile(wb, `${fileName}.xlsx`);
     });
 });
 </script>

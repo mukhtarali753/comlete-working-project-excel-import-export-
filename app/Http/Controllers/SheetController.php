@@ -6,19 +6,15 @@ use App\Models\Sheet;
 use App\Models\SheetRow;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class SheetController extends Controller
 {
     public function index()
     {
         $businesses = [];
-      
-         
-    
         return view('file.preview', compact('businesses'));
-        
     }
-    
 
     public function saveSheets(Request $request)
     {
@@ -29,8 +25,11 @@ class SheetController extends Controller
                 'sheets.*.name' => 'required|string|max:255',
                 'sheets.*.data' => 'required|string',
                 'sheets.*.order' => 'nullable|integer|min:0',
+                'sheets.*.id' => 'nullable|exists:sheets,id',
                 'file_id' => 'nullable|exists:files,id',
             ]);
+
+            DB::beginTransaction();
 
             $file = null;
 
@@ -39,20 +38,28 @@ class SheetController extends Controller
             }
 
             if (!$file) {
-                $file = File::firstOrCreate(
-                    ['name' => $data['name']],
-                    [
-                        'user_id' => Auth::check() ? Auth::id() : null,
-                    ]
-                );
+                $file = File::create([
+                    'name' => $data['name'],
+                    'user_id' => Auth::check() ? Auth::id() : null,
+                ]);
             }
+
+            // Get current sheet IDs to detect deletions
+            $currentSheetIds = $file->sheets()->pluck('id')->toArray();
+            $updatedSheetIds = [];
 
             foreach ($data['sheets'] as $sheetData) {
                 $sheet = Sheet::updateOrCreate(
-                    ['file_id' => $file->id, 'name' => $sheetData['name']],
-                    ['order' => $sheetData['order'] ?? 0]
+                    ['id' => $sheetData['id'] ?? null, 'file_id' => $file->id],
+                    [
+                        'name' => $sheetData['name'],
+                        'order' => $sheetData['order'] ?? 0,
+                    ]
                 );
 
+                $updatedSheetIds[] = $sheet->id;
+
+                // Delete all existing rows for this sheet
                 SheetRow::where('sheet_id', $sheet->id)->delete();
 
                 $rows = json_decode($sheetData['data'], true);
@@ -80,11 +87,21 @@ class SheetController extends Controller
                 }
             }
 
+            // Delete sheets that were removed from the UI
+            $sheetsToDelete = array_diff($currentSheetIds, $updatedSheetIds);
+            if (!empty($sheetsToDelete)) {
+                Sheet::whereIn('id', $sheetsToDelete)->delete();
+            }
+
+            DB::commit();
+
             return response()->json([
                 'message' => 'Sheets and rows saved successfully.',
-                'file_id' => $file->id
+                'file_id' => $file->id,
+                'sheets' => $file->sheets()->select('id', 'name', 'order')->get()->toArray()
             ], 200);
         } catch (\Exception $e) {
+            DB::rollBack();
             return response()->json([
                 'message' => 'Failed to save sheets: ' . $e->getMessage()
             ], 500);
@@ -111,6 +128,7 @@ class SheetController extends Controller
             })->toArray();
 
             return [
+                'id' => $sheet->id,
                 'name' => $sheet->name,
                 'data' => $rows,
                 'config' => [
@@ -133,64 +151,29 @@ class SheetController extends Controller
         return response()->json(['files' => $files]);
     }
 
-    public function getSheets()
-    {
-        $sheets = Sheet::with('rows')->get()->map(function ($sheet) {
-            $rows = $sheet->rows->map(function ($row) {
-                return array_map(function ($value) {
-                    return ['v' => $value];
-                }, json_decode($row->sheet_data, true));
-            })->toArray();
-
-            return [
-                'name' => $sheet->name,
-                'data' => $rows,
-                'config' => [
-                    'rowlen' => array_fill(0, count($rows), 30),
-                    'columnlen' => array_fill(0, count($rows[0] ?? []), 200),
-                ],
-                'order' => $sheet->order,
-            ];
-        })->sortBy('order')->values()->toArray();
-
-        return response()->json($sheets);
-    }
-
-    public function getSheetsByFile($id)
-    {
-        $file = File::with('sheets')->findOrFail($id);
-
-        $sheets = $file->sheets->map(function ($sheet) {
-            return [
-                'name' => $sheet->name,
-                'data' => json_decode($sheet->data, true),
-                'config' => json_decode($sheet->config, true),
-                'order' => $sheet->order,
-            ];
-        });
-
-        return response()->json($sheets);
-    }
-
     public function deleteSheet($id)
-{
-    try {
-        $sheet = Sheet::findOrFail($id);
-
-        
-        SheetRow::where('sheet_id', $sheet->id)->delete();
-
-        
-        $sheet->delete();
-
-       
-     return response()->json(['message' => 'Sheet deleted successfully.'], 200);
-    } catch (\Exception $e) {
-        return response()->json(['message' => 'Failed to delete sheet: ' . $e->getMessage()], 500);
+    {
+        try {
+            DB::beginTransaction();
+            
+            $sheet = Sheet::findOrFail($id);
+            
+            // Delete all rows associated with this sheet
+            SheetRow::where('sheet_id', $sheet->id)->delete();
+            
+            // Delete the sheet itself
+            $sheet->delete();
+            
+            DB::commit();
+            
+            return response()->json([
+                'message' => 'Sheet deleted successfully.'
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Failed to delete sheet: ' . $e->getMessage()
+            ], 500);
+        }
     }
-}
-
-    
-
-
 }
