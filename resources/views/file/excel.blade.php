@@ -6,7 +6,13 @@
 <div class="container-fluid mt-4">
     <div class="card shadow mb-4">
         <div class="card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <h6 class="m-0 font-weight-bold text-primary">File Name: {{ $file->name ?? 'New Spreadsheet' }}</h6>
+            <h6 class="m-0 font-weight-bold text-primary" id="fileHeader">
+                @if(isset($file))
+                    File Name: {{ $file->name ?? 'New Spreadsheet' }}
+                @else
+                    Import File
+                @endif
+            </h6>
             <div class="d-flex flex-wrap align-items-center gap-2">
                 <input type="text" id="fileNameInput" class="form-control form-control-sm w-auto"
                        value="{{ $file->name ?? '' }}" placeholder="File name">
@@ -19,6 +25,9 @@
                 </button>
                 <button id="exportBtn" class="btn btn-sm btn-primary">
                     <i class="fas fa-file-export fa-sm"></i> Export
+                </button>
+                <button id="importExcelBtn" class="btn btn-sm btn-info">
+                    <i class="fas fa-file-import fa-sm"></i> Import Excel
                 </button>
             </div>
         </div>
@@ -33,6 +42,9 @@
 
 {{-- CSRF token --}}
 <meta name="csrf-token" content="{{ csrf_token() }}">
+
+{{-- Hidden file input for Excel import --}}
+<input type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" style="display: none;">
 
 {{-- Bootstrap JS (required for dropdowns) --}}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -50,6 +62,17 @@
 $(document).ready(function() {
     const initialSheets = @json($sheets ?? []);
     const fileId = @json($file->id ?? null);
+    let isImporting = @json(!isset($file) ? true : false);
+
+    // Update header text based on import status
+    function updateHeaderText() {
+        const fileName = $('#fileNameInput').val().trim();
+        if (isImporting) {
+            $('#fileHeader').text('Import File');
+        } else {
+            $('#fileHeader').text(fileName ? `File Name: ${fileName}` : 'New Spreadsheet');
+        }
+    }
 
     // Function to create a blank sheet
     function createBlankSheet(rows = 16, cols = 26) {
@@ -116,7 +139,7 @@ $(document).ready(function() {
             userMenuItem: []
         });
 
-        // Add custom context menu for sheet deletion now a add delete are working
+        // Add custom context menu for sheet deletion
         luckysheet.setConfig({
             hook: {
                 onToggleSheetMenu: function(menu) {
@@ -167,6 +190,7 @@ $(document).ready(function() {
 
     // Initialize Luckysheet
     initializeLuckysheet(initialSheets);
+    updateHeaderText();
 
     // Add new sheet button handler
     $('#addNewSheetBtn').on('click', function() {
@@ -230,6 +254,9 @@ $(document).ready(function() {
             },
             success: function(response) {
                 alert('Data saved successfully!');
+                isImporting = false;
+                updateHeaderText();
+                
                 if (!fileId && response.file_id) {
                     window.history.replaceState({}, '', `/excel-preview/${response.file_id}`);
                 }
@@ -253,27 +280,119 @@ $(document).ready(function() {
     });
 
     // Export button handler
-  // Export button handler - exports all sheets to a single Excel file
-$('#exportBtn').on('click', function() {
-    const allSheets = luckysheet.getAllSheets();
-    const wb = XLSX.utils.book_new();
-    
-    // Process each sheet
-    allSheets.forEach(sheet => {
-        // Get the sheet data and convert to 2D array
-        const sheetData = sheet.data.map(row => 
-            row ? row.map(cell => cell?.v || "") : []
-        );
+    $('#exportBtn').on('click', function() {
+        const allSheets = luckysheet.getAllSheets();
+        const wb = XLSX.utils.book_new();
         
-        // Create worksheet and add to workbook
-        const ws = XLSX.utils.aoa_to_sheet(sheetData);
-        XLSX.utils.book_append_sheet(wb, ws, sheet.name || `Sheet${sheet.order + 1}`);
+        // Process each sheet
+        allSheets.forEach(sheet => {
+            // Get the sheet data and convert to 2D array
+            const sheetData = sheet.data.map(row => 
+                row ? row.map(cell => cell?.v || "") : []
+            );
+            
+            // Create worksheet and add to workbook
+            const ws = XLSX.utils.aoa_to_sheet(sheetData);
+            XLSX.utils.book_append_sheet(wb, ws, sheet.name || `Sheet${sheet.order + 1}`);
+        });
+        
+        // Generate file name and download
+        const fileName = $('#fileNameInput').val().trim() || 'export';
+        XLSX.writeFile(wb, `${fileName}.xlsx`);
     });
-    
-    // Generate file name and download
-    const fileName = $('#fileNameInput').val().trim() || 'export';
-    XLSX.writeFile(wb, `${fileName}.xlsx`);
-});
+
+    // Import Excel button handler
+    $('#importExcelBtn').on('click', function() {
+        $('#excelFileInput').click();
+    });
+
+    // Handle file selection for import
+    $('#excelFileInput').on('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                
+                // Convert workbook to Luckysheet format
+                const sheets = workbook.SheetNames.map((sheetName, index) => {
+                    const worksheet = workbook.Sheets[sheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                    
+                    // Convert to Luckysheet format
+                    const sheetData = jsonData.map(row => 
+                        row.map(cell => ({ v: cell || "" }))
+                    );
+                    
+                    return {
+                        name: sheetName,
+                        data: sheetData,
+                        order: index,
+                        status: 1,
+                        config: {
+                            rowlen: {},
+                            columnlen: {}
+                        },
+                        __isNew: true
+                    };
+                });
+
+                // Initialize Luckysheet with imported data
+                initializeLuckysheet(sheets);
+                
+                // Set importing flag and update header
+                isImporting = true;
+                updateHeaderText();
+                
+                // Update file name to the imported file's name (without extension)
+                const fileName = file.name.replace(/\.[^/.]+$/, "");
+                $('#fileNameInput').val(fileName);
+
+                // Save imported data to database
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('file_name', fileName);
+
+                $.ajax({
+                    url: '{{ route("sheets.import") }}',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    headers: {
+                        'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                    },
+                    success: function(response) {
+                        alert('Excel file imported and successfully!');
+                        // Update URL if new file was created
+                        if (response.file_id && !fileId) {
+                            window.history.replaceState({}, '', `/excel-preview/${response.file_id}`);
+                        }
+                    },
+                    error: function(xhr) {
+                        alert('Error saving to database: ' + (xhr.responseJSON?.message || xhr.statusText));
+                    }
+                });
+                
+            } catch (error) {
+                alert('Error importing Excel file: ' + error.message);
+            }
+        };
+        
+        reader.readAsArrayBuffer(file);
+        
+        // Clear the file input
+        e.target.value = '';
+    });
+
+    // Update header when file name changes
+    $('#fileNameInput').on('input', function() {
+        isImporting = false;
+        updateHeaderText();
+    });
 });
 </script>
 
@@ -283,7 +402,7 @@ $('#exportBtn').on('click', function() {
     padding: 0 !important;
 }
 #luckysheet-wrapper {
-    height: 100%;
+    height:100%;
     width: 100%;
     background-color: #fff;
 }

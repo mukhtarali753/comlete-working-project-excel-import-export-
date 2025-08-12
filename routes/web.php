@@ -15,6 +15,7 @@ use App\Http\Controllers\ExcelController;
 use App\Http\Controllers\BusinessController;
 use App\Http\Controllers\ShopControlle;
 use App\Http\Controllers\SheetController;
+use App\Http\Controllers\ExcelImportController;
 
 
 use Maatwebsite\Excel\Facades\Excel;
@@ -180,6 +181,7 @@ Route::prefix('businesses')->controller(BusinessController::class)->group(functi
 Route::controller(SheetController::class)->group(function () {
     Route::get('/excel-preview/{fileId?}', 'index')->name('excel.preview');
     Route::post('/save-sheets', 'saveSheets')->name('sheets.save');
+    Route::post('/import-excel', 'importExcel')->name('sheets.import');
     Route::get('/sheets/{file}', 'show')->name('sheets.show');
     Route::get('/files', 'listFiles')->name('files.list');
     Route::get('/get-sheets', 'getSheets')->name('sheets.get');
@@ -187,6 +189,15 @@ Route::controller(SheetController::class)->group(function () {
     Route::get('/files/{id}/sheets', 'getSheetsByFile');
     Route::delete('/sheets/{id}', 'deleteSheet')->name('sheets.delete');
     Route::get('/export/{file}/{type}', 'export')->name('sheets.export');
+});
+
+// Excel Import Routes
+Route::prefix('excel-import')->name('excel.import.')->middleware(['auth'])->group(function () {
+    Route::get('/', [ExcelImportController::class, 'index'])->name('index');
+    Route::post('/preview', [ExcelImportController::class, 'preview'])->name('preview');
+    Route::post('/process', [ExcelImportController::class, 'import'])->name('process');
+    Route::get('/show/{file}', [ExcelImportController::class, 'show'])->name('show');
+    Route::get('/download/{file}/{type?}', [ExcelImportController::class, 'download'])->name('download');
 });
 
 

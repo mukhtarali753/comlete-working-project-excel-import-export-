@@ -176,4 +176,87 @@ class SheetController extends Controller
             ], 500);
         }
     }
+
+    public function importExcel(Request $request)
+    {
+        try {
+            $request->validate([
+                'file' => 'required|file|mimes:xlsx,xls,csv|max:2048',
+                'file_name' => 'nullable|string|max:255',
+            ]);
+
+            $file = $request->file('file');
+            $fileName = $request->input('file_name') ?: $file->getClientOriginalName();
+            
+            // Store the file temporarily
+            $path = $file->store('temp');
+            
+            // Use Maatwebsite Excel to read the file
+            $sheets = \Maatwebsite\Excel\Facades\Excel::toArray([], $path);
+            
+            DB::beginTransaction();
+
+            // Create or update the file record
+            $fileRecord = File::create([
+                'name' => $fileName,
+                'user_id' => Auth::id(),
+            ]);
+
+            $importedSheets = 0;
+            $importedRows = 0;
+
+            foreach ($sheets as $sheetIndex => $sheetData) {
+                // Create sheet record
+                $sheet = Sheet::create([
+                    'file_id' => $fileRecord->id,
+                    'name' => 'Sheet' . ($sheetIndex + 1),
+                    'order' => $sheetIndex,
+                ]);
+
+                $importedSheets++;
+
+                // Import rows
+                foreach ($sheetData as $rowIndex => $row) {
+                    if (!is_array($row)) continue;
+
+                    $cleanRow = [];
+                    $allEmpty = true;
+
+                    foreach ($row as $cell) {
+                        $value = trim($cell ?? '');
+                        $cleanRow[] = $value;
+                        if ($value !== '') {
+                            $allEmpty = false;
+                        }
+                    }
+
+                    // Skip empty rows (except header row)
+                    if ($allEmpty && $rowIndex !== 0) continue;
+
+                    SheetRow::create([
+                        'sheet_id' => $sheet->id,
+                        'sheet_data' => json_encode($cleanRow),
+                    ]);
+                    $importedRows++;
+                }
+            }
+
+            // Clean up temporary file
+            \Illuminate\Support\Facades\Storage::delete($path);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => "Successfully imported {$importedSheets} sheet(s) with {$importedRows} row(s).",
+                'file_id' => $fileRecord->id,
+                'file_name' => $fileName,
+            ], 200);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Failed to import Excel file: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
