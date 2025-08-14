@@ -44,18 +44,38 @@ class SheetController extends Controller
                 ]);
             }
 
-            // Get current sheet IDs to detect deletions
-            $currentSheetIds = $file->sheets()->pluck('id')->toArray();
+            // Track which sheets we're processing
             $updatedSheetIds = [];
 
             foreach ($data['sheets'] as $sheetData) {
-                $sheet = Sheet::updateOrCreate(
-                    ['id' => $sheetData['id'] ?? null, 'file_id' => $file->id],
-                    [
+                // Handle new sheets vs existing sheets differently
+                if (!empty($sheetData['id'])) {
+                    // Update existing sheet
+                    $sheet = Sheet::where('id', $sheetData['id'])
+                        ->where('file_id', $file->id)
+                        ->first();
+                    
+                    if ($sheet) {
+                        $sheet->update([
+                            'name' => $sheetData['name'],
+                            'order' => $sheetData['order'] ?? 0,
+                        ]);
+                    } else {
+                        // Sheet ID provided but not found, create new one
+                        $sheet = Sheet::create([
+                            'file_id' => $file->id,
+                            'name' => $sheetData['name'],
+                            'order' => $sheetData['order'] ?? 0,
+                        ]);
+                    }
+                } else {
+                    // Create new sheet
+                    $sheet = Sheet::create([
+                        'file_id' => $file->id,
                         'name' => $sheetData['name'],
                         'order' => $sheetData['order'] ?? 0,
-                    ]
-                );
+                    ]);
+                }
 
                 $updatedSheetIds[] = $sheet->id;
 
@@ -87,11 +107,9 @@ class SheetController extends Controller
                 }
             }
 
-            // Delete sheets that were removed from the UI
-            $sheetsToDelete = array_diff($currentSheetIds, $updatedSheetIds);
-            if (!empty($sheetsToDelete)) {
-                Sheet::whereIn('id', $sheetsToDelete)->delete();
-            }
+            // Note: We're not automatically deleting sheets that aren't in the current request
+            // This prevents accidental deletion when adding new sheets
+            // Sheets should be explicitly deleted through the delete endpoint
 
             DB::commit();
 

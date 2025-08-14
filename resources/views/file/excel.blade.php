@@ -101,12 +101,12 @@ $(document).ready(function() {
         const formattedSheets = sheets.map(sheet => {
             const sheetData = {
                 name: sheet.name,
-                data: Array.isArray(sheet.data) ? sheet.data : JSON.parse(sheet.data),
+                data: Array.isArray(sheet.data) ? sheet.data : (typeof sheet.data === 'string' ? JSON.parse(sheet.data) : []),
                 order: sheet.order,
                 status: 1,
                 config: {
-                    rowlen: {},
-                    columnlen: {}
+                    rowlen: sheet.config?.rowlen || {},
+                    columnlen: sheet.config?.columnlen || {}
                 }
             };
             
@@ -193,8 +193,9 @@ $(document).ready(function() {
         window.sheetCount = window.sheetCount || initialSheets.length;
         window.sheetCount++;
 
-        const allSheets = luckysheet.getAllSheets();
-        const existingNames = allSheets.map(s => s.name.toLowerCase());
+        // Get current sheets with their data preserved
+        const currentSheets = luckysheet.getAllSheets();
+        const existingNames = currentSheets.map(s => s.name.toLowerCase());
         let newSheetName = `Sheet${window.sheetCount}`;
 
         while (existingNames.includes(newSheetName.toLowerCase())) {
@@ -215,15 +216,22 @@ $(document).ready(function() {
                 rowlen: Object.fromEntries([...Array(blankRows).keys()].map(i => [i, 30])),
                 columnlen: Object.fromEntries([...Array(blankCols).keys()].map(j => [j, 200]))
             },
-            order: allSheets.length,
+            order: currentSheets.length,
             status: 1,
             celldata: [],
             __isNew: true
         };
 
-        allSheets.push(newSheet);
-        initializeLuckysheet(allSheets);
-        luckysheet.setSheetActive(allSheets.length - 1);
+        // Add the new sheet to the current sheets array
+        currentSheets.push(newSheet);
+        
+        // Reinitialize with all sheets (preserving existing data)
+        initializeLuckysheet(currentSheets);
+        
+        // Switch to the new sheet after a small delay to ensure initialization is complete
+        setTimeout(() => {
+            luckysheet.setSheetActive(currentSheets.length - 1);
+        }, 100);
     });
 
     // Save data button handler

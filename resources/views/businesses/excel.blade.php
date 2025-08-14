@@ -3,6 +3,10 @@
 @section('title', 'Excel Preview')
 
 @section('content')
+
+{{-- CSRF token --}}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+
 <div class="container-fluid mt-4">
     <div class="card shadow mb-4">
         <div class="card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
@@ -177,9 +181,34 @@ $('#existingFileSelect').on('change', function () {
 
     function initializeLuckysheet(sheets) {
         try {
+            // Destroy existing instance if it exists
+            if (typeof luckysheet !== 'undefined' && luckysheet.getAllSheets) {
+                luckysheet.destroy();
+            }
+            
+            // Ensure sheets have proper data structure
+            const formattedSheets = sheets.map(sheet => {
+                const sheetData = {
+                    name: sheet.name,
+                    data: Array.isArray(sheet.data) ? sheet.data : (typeof sheet.data === 'string' ? JSON.parse(sheet.data) : []),
+                    order: sheet.order,
+                    status: 1,
+                    config: {
+                        rowlen: sheet.config?.rowlen || {},
+                        columnlen: sheet.config?.columnlen || {}
+                    }
+                };
+                
+                if (sheet.id) {
+                    sheetData.id = sheet.id;
+                }
+                
+                return sheetData;
+            });
+            
             luckysheet.create({
                 container: 'luckysheet',
-                data: sheets,
+                data: formattedSheets,
                 showinfobar: false,
                 showtoolbar: false,
                 showstatisticBar: false,
@@ -195,10 +224,18 @@ $('#existingFileSelect').on('change', function () {
         }
     }
 
-    $('#addNewSheetBtn').on('click', addNewSheet);
-    $('#saveSheetBtn').on('click', saveToDatabase);
-    $('#exportXlsxBtn').on('click', () => exportSheet('xlsx'));
-    $('#exportCsvBtn').on('click', () => exportSheet('csv'));
+    $('#addNewSheetBtn').on('click', function() {
+        addNewSheet();
+    });
+    $('#saveSheetBtn').on('click', function() {
+        saveToDatabase();
+    });
+    $('#exportXlsxBtn').on('click', function() {
+        exportSheet('xlsx');
+    });
+    $('#exportCsvBtn').on('click', function() {
+        exportSheet('csv');
+    });
 
     luckysheet.on('cellEdited', function() {
         const allSheets = luckysheet.getAllSheets();
@@ -206,150 +243,160 @@ $('#existingFileSelect').on('change', function () {
         allSheets[activeSheetIndex].__modified = true;
     });
 
-
-
-    
-});
-
-function addNewSheet() {
-    window.sheetCount = window.sheetCount || 1;
-    window.sheetCount++;
-
-    const allSheets = luckysheet.getAllSheets();
-    const existingNames = allSheets.map(s => s.name.toLowerCase());
-
-    let newSheetName = `Sheet${window.sheetCount}`;
-    while (existingNames.includes(newSheetName.toLowerCase())) {
+    // Define addNewSheet function inside document ready
+    function addNewSheet() {
+        window.sheetCount = window.sheetCount || 1;
         window.sheetCount++;
-        newSheetName = `Sheet${window.sheetCount}`;
-    }
 
-    const headerRow = allSheets[0]?.data?.[0] || [];
+        // Get current sheets with their data preserved
+        const currentSheets = luckysheet.getAllSheets();
+        const existingNames = currentSheets.map(s => s.name.toLowerCase());
 
-    const newSheetData = [
-        headerRow.map(cell => ({ v: cell?.v || '' }))
-    ];
-
-    for (let i = 1; i < 16; i++) {
-        let row = [];
-        for (let j = 0; j < headerRow.length; j++) {
-            row.push({ v: "" });
-        }
-        newSheetData.push(row);
-    }
-
-    const newSheet = {
-        name: newSheetName,
-        data: newSheetData,
-        config: {
-            rowlen: Object.fromEntries([...Array(16).keys()].map(i => [i, 30])),
-            columnlen: Object.fromEntries([...Array(headerRow.length).keys()].map(j => [j, 200]))
-        },
-        order: allSheets.length,
-        __isNew: true
-    };
-
-    allSheets.push(newSheet);
-
-    luckysheet.create({
-        container: 'luckysheet',
-        data: allSheets,
-        showinfobar: false,
-        showtoolbar: false,
-        showstatisticBar: false,
-        showSheetBar: true,
-        allowEdit: true,
-        enableAddRow: true,
-        enableAddCol: true,
-        enableContextmenu: true,
-        showGridLines: true
-    });
-
-    luckysheet.setSheetActive(allSheets.length - 1);
-}
-
-
-function saveToDatabase() {
-    try {
-        const allSheets = luckysheet.getAllSheets();
-        const sheetsToSave = allSheets.filter(s => s.__isNew || s.__modified);
-        if (sheetsToSave.length === 0) {
-            alert("No new or modified sheets to save.");
-            return;
+        let newSheetName = `Sheet${window.sheetCount}`;
+        while (existingNames.includes(newSheetName.toLowerCase())) {
+            window.sheetCount++;
+            newSheetName = `Sheet${window.sheetCount}`;
         }
 
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const enteredName = $('#fileNameInput').val().trim();
-        const selectedOption = $('#existingFileSelect').find('option:selected');
-        const existingFileId = selectedOption.val();
-        const existingFileName = selectedOption.data('name');
+        const headerRow = currentSheets[0]?.data?.[0] || [];
 
-        const fileName = enteredName || existingFileName || `sheets_${timestamp}`;
+        const newSheetData = [
+            headerRow.map(cell => ({ v: cell?.v || '' }))
+        ];
 
-        const fileData = {
-            name: fileName,
-            type: 'xlsx',
-            sheets: sheetsToSave.map((sheet, index) => ({
-                name: sheet.name,
-                data: JSON.stringify(sheet.data),
-                order: sheet.order
-            }))
+        for (let i = 1; i < 16; i++) {
+            let row = [];
+            for (let j = 0; j < headerRow.length; j++) {
+                row.push({ v: "" });
+            }
+            newSheetData.push(row);
+        }
+
+        const newSheet = {
+            name: newSheetName,
+            data: newSheetData,
+            config: {
+                rowlen: Object.fromEntries([...Array(16).keys()].map(i => [i, 30])),
+                columnlen: Object.fromEntries([...Array(headerRow.length).keys()].map(j => [j, 200]))
+            },
+            order: currentSheets.length,
+            __isNew: true
         };
 
-        if (existingFileId) {
-            fileData.file_id = existingFileId;
-        }
+        // Add the new sheet to the current sheets array
+        currentSheets.push(newSheet);
+        
+        // Reinitialize with all sheets (preserving existing data)
+        initializeLuckysheet(currentSheets);
+        
+        // Switch to the new sheet after a small delay to ensure initialization is complete
+        setTimeout(() => {
+            luckysheet.setSheetActive(currentSheets.length - 1);
+        }, 100);
+    }
 
-        $.ajax({
-            url: '{{ route("sheets.save") }}',
-            type: 'POST',
-            data: JSON.stringify(fileData),
-            contentType: 'application/json',
-            headers: {
-                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
-            },
-            success: function(response) {
-                alert('Sheet data saved successfully!');
-                sheetsToSave.forEach(sheet => {
-                    delete sheet.__isNew;
-                    delete sheet.__modified;
-                });
-            },
-            error: function(xhr, status, error) {
-                alert('Failed to save data: ' + (xhr.responseJSON?.message || error));
+    // Define saveToDatabase function inside document ready
+    function saveToDatabase() {
+        try {
+            const allSheets = luckysheet.getAllSheets();
+            
+            // Check if there are any new or modified sheets
+            const hasChanges = allSheets.some(s => s.__isNew || s.__modified);
+            if (!hasChanges) {
+                alert("No changes to save.");
+                return;
             }
-        });
-    } catch (err) {
-        alert('Save failed: ' + err.message);
-    }
-}
 
-function exportSheet(type) {
-    try {
-        const sheet = luckysheet.getSheet();
-        const maxCol = Math.max(...sheet.data.map(row => row ? row.length : 0));
-        const exportData = sheet.data.map(row => {
-            return [...Array(maxCol).keys()].map(i => row?.[i]?.v || "");
-        });
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const enteredName = $('#fileNameInput').val().trim();
+            const selectedOption = $('#existingFileSelect').find('option:selected');
+            const existingFileId = selectedOption.val();
+            const existingFileName = selectedOption.data('name');
 
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet(exportData);
-        XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
+            const fileName = enteredName || existingFileName || `sheets_${timestamp}`;
 
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const fileName = `business-data_${timestamp}`;
+            const fileData = {
+                name: fileName,
+                type: 'xlsx',
+                sheets: allSheets.map((sheet, index) => ({
+                    name: sheet.name,
+                    data: JSON.stringify(sheet.data),
+                    order: sheet.order,
+                    id: sheet.id || null
+                }))
+            };
 
-        if (type === 'csv') {
-            const csv = XLSX.utils.sheet_to_csv(ws);
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            saveAs(blob, `${fileName}.csv`);
-        } else {
-            XLSX.writeFile(wb, `${fileName}.${type}`);
+            if (existingFileId) {
+                fileData.file_id = existingFileId;
+            }
+
+            $.ajax({
+                url: '{{ route("sheets.save") }}',
+                type: 'POST',
+                data: JSON.stringify(fileData),
+                contentType: 'application/json',
+                headers: {
+                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                },
+                success: function(response) {
+                    alert('Sheet data saved successfully!');
+                    
+                    // Clear modification flags for all sheets
+                    allSheets.forEach(sheet => {
+                        delete sheet.__isNew;
+                        delete sheet.__modified;
+                    });
+                    
+                    // Update sheet IDs if they were created
+                    if (response.sheets) {
+                        const updatedSheets = luckysheet.getAllSheets().map((sheet, index) => {
+                            if (sheet.__isNew && response.sheets[index]) {
+                                sheet.id = response.sheets[index].id;
+                                delete sheet.__isNew;
+                            }
+                            return sheet;
+                        });
+                        // Reinitialize with updated sheet IDs
+                        initializeLuckysheet(updatedSheets);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    alert('Failed to save data: ' + (xhr.responseJSON?.message || error));
+                }
+            });
+        } catch (err) {
+            alert('Save failed: ' + err.message);
         }
-    } catch (err) {
-        alert("Export failed: " + err.message);
     }
-}
+
+    // Define exportSheet function inside document ready
+    function exportSheet(type) {
+        try {
+            const sheet = luckysheet.getSheet();
+            const maxCol = Math.max(...sheet.data.map(row => row ? row.length : 0));
+            const exportData = sheet.data.map(row => {
+                return [...Array(maxCol).keys()].map(i => row?.[i]?.v || "");
+            });
+
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(exportData);
+            XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const fileName = `business-data_${timestamp}`;
+
+            if (type === 'csv') {
+                const csv = XLSX.utils.sheet_to_csv(ws);
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                saveAs(blob, `${fileName}.csv`);
+            } else {
+                XLSX.writeFile(wb, `${fileName}.${type}`);
+            }
+        } catch (err) {
+            alert("Export failed: " + err.message);
+        }
+    }
+});
 </script>
 
 <style>
