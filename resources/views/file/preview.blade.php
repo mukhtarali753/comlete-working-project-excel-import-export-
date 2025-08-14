@@ -7,9 +7,14 @@
     <div class="card shadow mb-4">
         <div class="card-header py-3 d-flex justify-content-between align-items-center">
             <h5 class="m-0 font-weight-bold text-primary">Files</h5>
-            <button id="openCreateFileModal" class="btn btn-info btn-sm ml-2">
-                <i class="fas fa-plus"></i> Create File
-            </button>
+            <div class="d-flex space-x-2">
+                <button id="importSheetBtn" class="btn btn-success btn-sm">
+                    <i class="fas fa-file-import"></i> Import Sheet
+                </button>
+                <button id="openCreateFileModal" class="btn btn-info btn-sm">
+                    <i class="fas fa-plus"></i> Create File
+                </button>
+            </div>
         </div>
 
         <div class="card-body">
@@ -36,6 +41,9 @@
                                 <button class="btn btn-sm btn-primary edit-row" data-id="{{ $file->id }}">
                                     <i class="fas fa-edit"></i>
                                 </button>
+                                <a href="{{ route('sheets.export', [$file, 'xlsx']) }}" class="btn btn-sm btn-warning">
+                                    <i class="fas fa-file-export"></i>
+                                </a>
                             </td>
                         </tr>
                         @empty
@@ -235,6 +243,46 @@ $(document).ready(function () {
             });
         }
     });
+
+    // Import Sheet button handler
+    $('#importSheetBtn').on('click', function() {
+        $('#importSheetFileInput').click();
+    });
+
+    // Handle file selection for Import Sheet
+    $('#importSheetFileInput').on('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Create FormData and submit to import route
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('_token', '{{ csrf_token() }}');
+
+        // Submit the form to import the file directly
+        $.ajax({
+            url: '{{ route("sheets.import") }}',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                alert('Sheet imported successfully!');
+                // Reload the page to show the new file
+                window.location.reload();
+            },
+            error: function(xhr) {
+                alert('Error importing sheet: ' + (xhr.responseJSON?.message || xhr.statusText));
+            }
+        });
+        
+        // Clear the file input
+        e.target.value = '';
+    });
 });
 </script>
+
+<!-- Hidden file input for Import Sheet -->
+<input type="file" id="importSheetFileInput" accept=".xlsx,.xls,.csv" style="display: none;">
+
 @endsection

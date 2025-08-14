@@ -7,9 +7,14 @@
             <div class="p-6 text-gray-900">
                 <div class="flex justify-between items-center mb-6">
                     <h2 class="text-2xl font-bold text-gray-800">Excel Preview & Import</h2>
-                    <a href="{{ route('excel.import.index') }}" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition duration-200">
-                        ← Back to Import
-                    </a>
+                    <div class="flex space-x-2">
+                        <button id="importExcelBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition duration-200">
+                            📥 Import Excel
+                        </button>
+                        <a href="{{ route('excel.import.index') }}" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition duration-200">
+                            ← Back to Import
+                        </a>
+                    </div>
                 </div>
 
                 <!-- File Info -->
@@ -100,5 +105,49 @@
         </div>
     </div>
 </div>
+<!-- Hidden file input for Excel import -->
+<input type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" style="display: none;">
+
+<!-- jQuery -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+<script>
+$(document).ready(function() {
+    // Import Excel button handler
+    $('#importExcelBtn').on('click', function() {
+        $('#excelFileInput').click();
+    });
+
+    // Handle file selection for import
+    $('#excelFileInput').on('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Create FormData and submit to preview route
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('_token', '{{ csrf_token() }}');
+
+        // Submit the form to preview the file
+        $.ajax({
+            url: '{{ route("excel.import.preview") }}',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                // Reload the page to show the preview
+                window.location.reload();
+            },
+            error: function(xhr) {
+                alert('Error uploading file: ' + (xhr.responseJSON?.message || xhr.statusText));
+            }
+        });
+        
+        // Clear the file input
+        e.target.value = '';
+    });
+});
+</script>
 @endsection
 

@@ -26,9 +26,6 @@
                 <button id="exportBtn" class="btn btn-sm btn-primary">
                     <i class="fas fa-file-export fa-sm"></i> Export
                 </button>
-                <button id="importExcelBtn" class="btn btn-sm btn-info">
-                    <i class="fas fa-file-import fa-sm"></i> Import Excel
-                </button>
             </div>
         </div>
 
@@ -43,8 +40,7 @@
 {{-- CSRF token --}}
 <meta name="csrf-token" content="{{ csrf_token() }}">
 
-{{-- Hidden file input for Excel import --}}
-<input type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" style="display: none;">
+
 
 {{-- Bootstrap JS (required for dropdowns) --}}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -301,92 +297,7 @@ $(document).ready(function() {
         XLSX.writeFile(wb, `${fileName}.xlsx`);
     });
 
-    // Import Excel button handler
-    $('#importExcelBtn').on('click', function() {
-        $('#excelFileInput').click();
-    });
 
-    // Handle file selection for import
-    $('#excelFileInput').on('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            try {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                
-                // Convert workbook to Luckysheet format
-                const sheets = workbook.SheetNames.map((sheetName, index) => {
-                    const worksheet = workbook.Sheets[sheetName];
-                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                    
-                    // Convert to Luckysheet format
-                    const sheetData = jsonData.map(row => 
-                        row.map(cell => ({ v: cell || "" }))
-                    );
-                    
-                    return {
-                        name: sheetName,
-                        data: sheetData,
-                        order: index,
-                        status: 1,
-                        config: {
-                            rowlen: {},
-                            columnlen: {}
-                        },
-                        __isNew: true
-                    };
-                });
-
-                // Initialize Luckysheet with imported data
-                initializeLuckysheet(sheets);
-                
-                // Set importing flag and update header
-                isImporting = true;
-                updateHeaderText();
-                
-                // Update file name to the imported file's name (without extension)
-                const fileName = file.name.replace(/\.[^/.]+$/, "");
-                $('#fileNameInput').val(fileName);
-
-                // Save imported data to database
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('file_name', fileName);
-
-                $.ajax({
-                    url: '{{ route("sheets.import") }}',
-                    type: 'POST',
-                    data: formData,
-                    processData: false,
-                    contentType: false,
-                    headers: {
-                        'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
-                    },
-                    success: function(response) {
-                        alert('Excel file imported and successfully!');
-                        // Update URL if new file was created
-                        if (response.file_id && !fileId) {
-                            window.history.replaceState({}, '', `/excel-preview/${response.file_id}`);
-                        }
-                    },
-                    error: function(xhr) {
-                        alert('Error saving to database: ' + (xhr.responseJSON?.message || xhr.statusText));
-                    }
-                });
-                
-            } catch (error) {
-                alert('Error importing Excel file: ' + error.message);
-            }
-        };
-        
-        reader.readAsArrayBuffer(file);
-        
-        // Clear the file input
-        e.target.value = '';
-    });
 
     // Update header when file name changes
     $('#fileNameInput').on('input', function() {
