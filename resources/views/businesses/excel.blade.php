@@ -188,16 +188,18 @@ $('#existingFileSelect').on('change', function () {
             
             // Ensure sheets have proper data structure
             const formattedSheets = sheets.map(sheet => {
+                const hasCellData = Array.isArray(sheet.celldata) && sheet.celldata.length > 0;
                 const sheetData = {
                     name: sheet.name,
-                    data: Array.isArray(sheet.data) ? sheet.data : (typeof sheet.data === 'string' ? JSON.parse(sheet.data) : []),
                     order: sheet.order,
                     status: 1,
-                    config: {
-                        rowlen: sheet.config?.rowlen || {},
-                        columnlen: sheet.config?.columnlen || {}
-                    }
+                    config: sheet.config || { rowlen: {}, columnlen: {} },
                 };
+                if (hasCellData) {
+                    sheetData.celldata = sheet.celldata;
+                } else {
+                    sheetData.data = Array.isArray(sheet.data) ? sheet.data : (typeof sheet.data === 'string' ? JSON.parse(sheet.data) : []);
+                }
                 
                 if (sheet.id) {
                     sheetData.id = sheet.id;
@@ -210,7 +212,7 @@ $('#existingFileSelect').on('change', function () {
                 container: 'luckysheet',
                 data: formattedSheets,
                 showinfobar: false,
-                showtoolbar: false,
+                showtoolbar: true,
                 showstatisticBar: false,
                 showSheetBar: true,
                 allowEdit: true,
@@ -227,9 +229,7 @@ $('#existingFileSelect').on('change', function () {
     $('#addNewSheetBtn').on('click', function() {
         addNewSheet();
     });
-    $('#saveSheetBtn').on('click', function() {
-        saveToDatabase();
-    });
+    $('#saveSheetBtn').on('click', function() { saveToDatabase(false); });
     $('#exportXlsxBtn').on('click', function() {
         exportSheet('xlsx');
     });
@@ -237,10 +237,30 @@ $('#existingFileSelect').on('change', function () {
         exportSheet('csv');
     });
 
-    luckysheet.on('cellEdited', function() {
-        const allSheets = luckysheet.getAllSheets();
-        const activeSheetIndex = luckysheet.getActiveSheetIndex();
-        allSheets[activeSheetIndex].__modified = true;
+    if (luckysheet && typeof luckysheet.on === 'function') {
+        luckysheet.on('cellEdited', function() {
+            const allSheets = luckysheet.getAllSheets();
+            const activeSheetIndex = luckysheet.getActiveSheetIndex();
+            allSheets[activeSheetIndex].__modified = true;
+            scheduleAutoSave();
+        });
+    }
+
+    // Keyboard shortcuts: Ctrl/Cmd+S to save and autosave on common edit keys
+    $(document).on('keydown', function(e) {
+        const key = (e.key || '').toLowerCase();
+        const ctrl = e.ctrlKey || e.metaKey;
+        if (ctrl && key === 's') {
+            e.preventDefault();
+            saveToDatabase(false);
+            return;
+        }
+        if (ctrl && ['b','i','u','z','y'].includes(key)) {
+            scheduleAutoSave();
+        }
+        if (key === 'delete' || key === 'backspace' || key === 'enter' || key === 'tab') {
+            scheduleAutoSave();
+        }
     });
 
     // Define addNewSheet function inside document ready
@@ -296,7 +316,13 @@ $('#existingFileSelect').on('change', function () {
     }
 
     // Define saveToDatabase function inside document ready
-    function saveToDatabase() {
+    let autoSaveTimer = null;
+    function scheduleAutoSave() {
+        if (autoSaveTimer) clearTimeout(autoSaveTimer);
+        autoSaveTimer = setTimeout(() => saveToDatabase(true), 1500);
+    }
+
+    function saveToDatabase(isAuto = false) {
         try {
             const allSheets = luckysheet.getAllSheets();
             
@@ -321,6 +347,8 @@ $('#existingFileSelect').on('change', function () {
                 sheets: allSheets.map((sheet, index) => ({
                     name: sheet.name,
                     data: JSON.stringify(sheet.data),
+                    config: JSON.stringify(sheet.config || {}),
+                    celldata: JSON.stringify(sheet.celldata || []),
                     order: sheet.order,
                     id: sheet.id || null
                 }))
@@ -339,7 +367,7 @@ $('#existingFileSelect').on('change', function () {
                     'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
                 },
                 success: function(response) {
-                    alert('Sheet data saved successfully!');
+                    if (!isAuto) alert('Sheet data saved successfully!');
                     
                     // Clear modification flags for all sheets
                     allSheets.forEach(sheet => {
@@ -354,6 +382,7 @@ $('#existingFileSelect').on('change', function () {
                                 sheet.id = response.sheets[index].id;
                                 delete sheet.__isNew;
                             }
+                            delete sheet.__modified;
                             return sheet;
                         });
                         // Reinitialize with updated sheet IDs
@@ -413,6 +442,19 @@ $('#existingFileSelect').on('change', function () {
 #luckysheet {
     height: 100% !important;
     width: 100% !important;
+}
+
+/* Ensure toolbar is visible */
+.luckysheet-toolbar {
+    display: block !important;
+    visibility: visible !important;
+    height: auto !important;
+    min-height: 40px !important;
+}
+
+.luckysheet-toolbar-container {
+    display: block !important;
+    visibility: visible !important;
 }
 .dropdown-item i {
     width: 20px;

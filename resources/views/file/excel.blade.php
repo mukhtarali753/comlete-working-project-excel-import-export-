@@ -46,6 +46,9 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
 
 {{-- Luckysheet and dependencies --}}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+
+
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/css/pluginsCss.css" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/css/luckysheet.css" />
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -99,16 +102,18 @@ $(document).ready(function() {
 
         // Format sheets data to include IDs if they exist
         const formattedSheets = sheets.map(sheet => {
+            const hasCellData = Array.isArray(sheet.celldata) && sheet.celldata.length > 0;
             const sheetData = {
                 name: sheet.name,
-                data: Array.isArray(sheet.data) ? sheet.data : (typeof sheet.data === 'string' ? JSON.parse(sheet.data) : []),
                 order: sheet.order,
                 status: 1,
-                config: {
-                    rowlen: sheet.config?.rowlen || {},
-                    columnlen: sheet.config?.columnlen || {}
-                }
+                config: sheet.config || { rowlen: {}, columnlen: {} },
             };
+            if (hasCellData) {
+                sheetData.celldata = sheet.celldata;
+            } else {
+                sheetData.data = Array.isArray(sheet.data) ? sheet.data : (typeof sheet.data === 'string' ? JSON.parse(sheet.data) : []);
+            }
             
             if (sheet.id) {
                 sheetData.id = sheet.id;
@@ -122,7 +127,7 @@ $(document).ready(function() {
             container: 'luckysheet',
             data: formattedSheets,
             showinfobar: false,
-            showtoolbar: false,
+            showtoolbar: true,
             showstatisticBar: false,
             showSheetBar: true,
             allowEdit: true,
@@ -130,9 +135,7 @@ $(document).ready(function() {
             enableAddCol: true,
             enableContextmenu: true,
             showGridLines: true,
-            allowUpdateWhenUnFocused: false,
-            userInfo: null,
-            userMenuItem: []
+            allowUpdateWhenUnFocused: false
         });
 
         // Add custom context menu for sheet deletion
@@ -234,53 +237,93 @@ $(document).ready(function() {
         }, 100);
     });
 
-    // Save data button handler
-    $('#saveSheetBtn').on('click', function() {
+    function buildSavePayload() {
         const allSheets = luckysheet.getAllSheets();
         const fileName = $('#fileNameInput').val().trim() || `sheet_${new Date().toISOString().slice(0,10)}`;
+        return {
+            name: fileName,
+            sheets: allSheets.map(sheet => ({
+                name: sheet.name,
+                data: JSON.stringify(sheet.data),
+                config: JSON.stringify(sheet.config || {}),
+                celldata: JSON.stringify(sheet.celldata || []),
+                order: sheet.order,
+                id: sheet.id || null
+            })),
+            file_id: fileId || null
+        };
+    }
 
+    function saveNow(isAuto = false) {
+        const payload = buildSavePayload();
         $.ajax({
             url: '{{ route("sheets.save") }}',
             type: 'POST',
-            data: JSON.stringify({
-                name: fileName,
-                sheets: allSheets.map(sheet => ({
-                    name: sheet.name,
-                    data: JSON.stringify(sheet.data),
-                    order: sheet.order,
-                    id: sheet.id || null
-                })),
-                file_id: fileId || null
-            }),
+            data: JSON.stringify(payload),
             contentType: 'application/json',
-            headers: {
-                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
-            },
+            headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
             success: function(response) {
-                alert('Data saved successfully!');
+                if (!isAuto) alert('Data saved successfully!');
                 isImporting = false;
                 updateHeaderText();
-                
                 if (!fileId && response.file_id) {
                     window.history.replaceState({}, '', `/excel-preview/${response.file_id}`);
                 }
-                
-                // Update sheet IDs if they were created
                 if (response.sheets) {
                     const updatedSheets = luckysheet.getAllSheets().map((sheet, index) => {
                         if (sheet.__isNew && response.sheets[index]) {
                             sheet.id = response.sheets[index].id;
                             delete sheet.__isNew;
                         }
+                        delete sheet.__modified;
                         return sheet;
                     });
                     initializeLuckysheet(updatedSheets);
                 }
-            },
-            error: function(xhr) {
-                alert('Failed to save: ' + (xhr.responseJSON?.message || xhr.statusText));
             }
         });
+    }
+
+    let autoSaveTimer = null;
+    function scheduleAutoSave() {
+        if (autoSaveTimer) clearTimeout(autoSaveTimer);
+        autoSaveTimer = setTimeout(() => saveNow(true), 1500);
+    }
+
+    // Save data button handler
+    $('#saveSheetBtn').on('click', function() { saveNow(false); });
+
+    // Mark modified and autosave on edits
+    if (luckysheet && typeof luckysheet.on === 'function') {
+        luckysheet.on('cellEdited', function() {
+            const allSheets = luckysheet.getAllSheets();
+            const activeSheetIndex = luckysheet.getActiveSheetIndex();
+            allSheets[activeSheetIndex].__modified = true;
+            scheduleAutoSave();
+        });
+    }
+
+    // Keyboard shortcuts: Ctrl/Cmd+S to save, and autosave on common edit keys
+    $(document).on('keydown', function(e) {
+        const key = (e.key || '').toLowerCase();
+        const ctrl = e.ctrlKey || e.metaKey;
+        if (ctrl && key === 's') {
+            e.preventDefault();
+            saveNow(false);
+            return;
+        }
+        // Bold/Italic/Underline, Undo/Redo
+        if (ctrl && ['b','i','u','z','y'].includes(key)) {
+            scheduleAutoSave();
+        }
+        // Delete/Backspace edits
+        if (key === 'delete' || key === 'backspace') {
+            scheduleAutoSave();
+        }
+        // Enter/Tab often finalize edits
+        if (key === 'enter' || key === 'tab') {
+            scheduleAutoSave();
+        }
     });
 
     // Export button handler
@@ -329,15 +372,49 @@ $(document).ready(function() {
     height: 100% !important;
     width: 100% !important;
 }
+
+/* Ensure toolbar is visible */
+.luckysheet-toolbar {
+    display: block !important;
+    visibility: visible !important;
+    height: auto !important;
+    min-height: 40px !important;
+}
+
+.luckysheet-toolbar-container {
+    display: block !important;
+    visibility: visible !important;
+}
+
+#fileHeader{
+    color: black;
+}
 .dropdown-item i {
     width: 20px;
     text-align: center;
     margin-right: 5px;
 }
+
+
+/* Ensure toolbar and icons are visible */
+.luckysheet-toolbar, 
+.luckysheet-toolbar-container,
+.luckysheet-toolbar i {
+    display: block !important;
+    visibility: visible !important;
+    color: #000 !important; /* black icons */
+    z-index: 10;
+}
+
+
+
+
 @media (max-width: 768px) {
     .card-body {
         height: 65vh;
     }
 }
+
+
 </style>
 @endsection

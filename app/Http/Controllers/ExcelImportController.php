@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ExcelImportController extends Controller
 {
@@ -60,9 +62,19 @@ class ExcelImportController extends Controller
 
             // Create the file record
             $file = File::create([
-                'name' => $fileName,
+                'name' => pathinfo($fileName, PATHINFO_FILENAME),
                 'user_id' => Auth::id(),
             ]);
+
+            // Move the temp uploaded file to a permanent location and save path/extension
+            $extension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+            $destination = 'excel/uploads/' . $file->id . '_' . $fileName;
+            // Ensure destination directory exists
+            Storage::makeDirectory('excel/uploads');
+            Storage::move($filePath, $destination);
+            $file->path = $destination;
+            $file->extension = $extension;
+            $file->save();
 
             $importedSheets = 0;
             $importedRows = 0;
@@ -71,16 +83,27 @@ class ExcelImportController extends Controller
             // Import each selected sheet
             foreach ($selectedSheets as $sheetName) {
                 try {
-                    $sheetData = Excel::toArray([], $filePath);
-                    $sheetIndex = $this->getSheetIndex($sheetName, $filePath);
+                    // Read from the permanent stored path to ensure consistency
+                    $sheetData = Excel::toArray([], storage_path('app/' . $file->path));
+                    $sheetIndex = $this->getSheetIndex($sheetName, $file->path);
                     
                     if ($sheetIndex !== false) {
                         $rows = $sheetData[$sheetIndex] ?? [];
                         
                         // Create sheet record
+                        // Check for duplicate sheet names and generate unique names if needed
+                        $baseName = $sheetName;
+                        $counter = 1;
+                        $uniqueName = $baseName;
+                        
+                        while (Sheet::where('file_id', $file->id)->where('name', $uniqueName)->exists()) {
+                            $uniqueName = $baseName . ' (' . $counter . ')';
+                            $counter++;
+                        }
+                        
                         $sheet = Sheet::create([
                             'file_id' => $file->id,
-                            'name' => $sheetName,
+                            'name' => $uniqueName,
                             'order' => $this->getSheetOrder($sheetName),
                         ]);
 
@@ -108,8 +131,7 @@ class ExcelImportController extends Controller
                 }
             }
 
-            // Clean up temporary file
-            Storage::delete($filePath);
+            // Temp file has been moved; nothing to delete here
 
             // Clean up empty sheets
             Sheet::where('file_id', $file->id)
@@ -152,43 +174,98 @@ class ExcelImportController extends Controller
     {
         $fileName = $file->name . '.' . $type;
         
-        // Create Excel export using the existing export functionality
+        // If we have the original stored file and the requested type matches or is xlsx, load it to preserve styles
+        if (!empty($file->path) && Storage::exists($file->path)) {
+            $absolutePath = storage_path('app/' . $file->path);
+            $reader = IOFactory::createReaderForFile($absolutePath);
+            // Ensure styles are read
+            if (method_exists($reader, 'setReadDataOnly')) {
+                $reader->setReadDataOnly(false);
+            }
+            $spreadsheet = $reader->load($absolutePath);
+
+            // Write current DB values into the workbook while keeping styles
         $sheets = $file->sheets()->orderBy('order')->get();
-        
+            foreach ($sheets as $sheetModel) {
+                $sheetTitle = $sheetModel->name;
+                $worksheet = $spreadsheet->getSheetByName($sheetTitle);
+                if ($worksheet === null) {
+                    // If sheet not found, create new worksheet with that name
+                    $worksheet = new \PhpOffice\PhpSpreadsheet\Worksheet\Worksheet($spreadsheet, $sheetTitle);
+                    $spreadsheet->addSheet($worksheet);
+                }
+
+                $rows = $sheetModel->rows->map(function ($row) {
+                    return json_decode($row->sheet_data, true);
+                })->toArray();
+
+                // Write values starting at A1
+                $startRow = 1;
+                foreach ($rows as $rowIndex => $rowValues) {
+                    foreach ($rowValues as $colIndex => $value) {
+                        $cellCoordinate = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1) . ($startRow + $rowIndex);
+                        $worksheet->setCellValue($cellCoordinate, $value);
+                    }
+                }
+            }
+
+            // Stream the workbook using the requested writer
+            $writerTypeMap = [
+                'xlsx' => 'Xlsx',
+                'xls'  => 'Xls',
+                'ods'  => 'Ods',
+                'csv'  => 'Csv',
+            ];
+            $writerKey = strtolower($type);
+            $writerType = $writerTypeMap[$writerKey] ?? 'Xlsx';
+            $writer = IOFactory::createWriter($spreadsheet, $writerType);
+
+            return new StreamedResponse(function () use ($writer) {
+                $writer->save('php://output');
+            }, 200, [
+                'Content-Type' => $this->getContentType($type),
+                'Content-Disposition' => 'attachment;filename="' . $fileName . '"',
+                'Cache-Control' => 'max-age=0',
+            ]);
+        }
+
+        // Fallback: previous behavior without formatting
+        $sheets = $file->sheets()->orderBy('order')->get();
         $exportData = [];
         foreach ($sheets as $sheet) {
             $rows = $sheet->rows->map(function ($row) {
                 return json_decode($row->sheet_data, true);
             })->toArray();
-            
             $exportData[$sheet->name] = $rows;
         }
 
         return Excel::download(new class($exportData) implements \Maatwebsite\Excel\Concerns\WithMultipleSheets {
             private $data;
-            
-            public function __construct($data) {
-                $this->data = $data;
-            }
-            
+            public function __construct($data) { $this->data = $data; }
             public function sheets(): array {
                 $sheets = [];
                 foreach ($this->data as $sheetName => $rows) {
                     $sheets[$sheetName] = new class($rows) implements \Maatwebsite\Excel\Concerns\ToArray {
                         private $rows;
-                        
-                        public function __construct($rows) {
-                            $this->rows = $rows;
-                        }
-                        
-                        public function array(array $array) {
-                            return $this->rows;
-                        }
+                        public function __construct($rows) { $this->rows = $rows; }
+                        public function array(array $array) { return $this->rows; }
                     };
                 }
                 return $sheets;
             }
         }, $fileName);
+    }
+
+    private function getContentType(string $extension): string
+    {
+        $map = [
+            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'xls' => 'application/vnd.ms-excel',
+            'csv' => 'text/csv',
+            'ods' => 'application/vnd.oasis.opendocument.spreadsheet',
+        ];
+        $ext = strtolower($extension);
+        return $map[$ext] ?? 'application/octet-stream';
     }
 
     private function getSheetNames($filePath)

@@ -7,6 +7,8 @@ use App\Models\SheetRow;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 
 class SheetController extends Controller
 {
@@ -35,6 +37,9 @@ class SheetController extends Controller
 
             if (!empty($data['file_id'])) {
                 $file = File::find($data['file_id']);
+                if (!$file) {
+                    throw new \Exception('File not found with ID: ' . $data['file_id']);
+                }
             }
 
             if (!$file) {
@@ -44,10 +49,24 @@ class SheetController extends Controller
                 ]);
             }
 
+            // Ensure we have a valid file
+            if (!$file || !$file->id) {
+                throw new \Exception('Failed to create or retrieve file');
+            }
+
             // Track which sheets we're processing
             $updatedSheetIds = [];
 
             foreach ($data['sheets'] as $sheetData) {
+                // Validate sheet data (excluding file_id since it's handled at the file level)
+                $sheetValidationRules = Sheet::getBasicValidationRules();
+                $sheetValidationRules['data'] = 'required|string';
+                
+                $validator = Validator::make($sheetData, $sheetValidationRules);
+                if ($validator->fails()) {
+                    throw new \Exception('Validation failed for sheet: ' . $validator->errors()->first());
+                }
+
                 // Handle new sheets vs existing sheets differently
                 if (!empty($sheetData['id'])) {
                     // Update existing sheet
@@ -61,18 +80,46 @@ class SheetController extends Controller
                             'order' => $sheetData['order'] ?? 0,
                         ]);
                     } else {
-                        // Sheet ID provided but not found, create new one
-                        $sheet = Sheet::create([
-                            'file_id' => $file->id,
-                            'name' => $sheetData['name'],
-                            'order' => $sheetData['order'] ?? 0,
-                        ]);
+                        // Sheet ID provided but not found, check if sheet with same name exists
+                        $existingSheet = Sheet::where('file_id', $file->id)
+                            ->where('name', $sheetData['name'])
+                            ->first();
+                        
+                        if ($existingSheet) {
+                            // Use existing sheet with same name
+                            $sheet = $existingSheet;
+                        } else {
+                            // Generate unique name for new sheet
+                            $baseName = $sheetData['name'];
+                            $counter = 1;
+                            $uniqueName = $baseName;
+                            
+                            while (Sheet::where('file_id', $file->id)->where('name', $uniqueName)->exists()) {
+                                $uniqueName = $baseName . ' (' . $counter . ')';
+                                $counter++;
+                            }
+                            
+                            $sheet = Sheet::create([
+                                'file_id' => $file->id,
+                                'name' => $uniqueName,
+                                'order' => $sheetData['order'] ?? 0,
+                            ]);
+                        }
                     }
                 } else {
-                    // Create new sheet
+                    // Create new sheet, but check for duplicate names
+                    $baseName = $sheetData['name'];
+                    $counter = 1;
+                    $uniqueName = $baseName;
+                    
+                    while (Sheet::where('file_id', $file->id)->where('name', $uniqueName)->exists()) {
+                        $uniqueName = $baseName . ' (' . $counter . ')';
+                        $counter++;
+                    }
+                    
                     $sheet = Sheet::create([
                         'file_id' => $file->id,
-                        'name' => $sheetData['name'],
+                        'name' => $uniqueName,
                         'order' => $sheetData['order'] ?? 0,
                     ]);
                 }
@@ -212,6 +259,18 @@ class SheetController extends Controller
             // Use Maatwebsite Excel to read the file
             $sheets = \Maatwebsite\Excel\Facades\Excel::toArray([], $path);
             
+            if (empty($sheets)) {
+                throw new \Exception('No data found in the uploaded file');
+            }
+            
+            // Debug: Log the structure of imported data
+            Log::info("Excel import started", [
+                'fileName' => $fileName,
+                'totalSheets' => count($sheets),
+                'firstSheetRows' => count($sheets[0] ?? []),
+                'firstSheetSample' => array_slice($sheets[0] ?? [], 0, 3)
+            ]);
+            
             DB::beginTransaction();
 
             // Create or update the file record
@@ -222,58 +281,213 @@ class SheetController extends Controller
 
             $importedSheets = 0;
             $importedRows = 0;
+            $errors = [];
 
             foreach ($sheets as $sheetIndex => $sheetData) {
-                // Create sheet record
-                $sheet = Sheet::create([
-                    'file_id' => $fileRecord->id,
-                    'name' => 'Sheet' . ($sheetIndex + 1),
-                    'order' => $sheetIndex,
-                ]);
+                try {
+                    // Debug: Log sheet processing
+                    Log::info("Processing sheet", [
+                        'sheetIndex' => $sheetIndex,
+                        'sheetDataRows' => count($sheetData),
+                        'sheetDataSample' => array_slice($sheetData, 0, 2)
+                    ]);
+                    
+                    // Generate unique sheet name to avoid duplicates
+                    $baseName = 'Sheet' . ($sheetIndex + 1);
+                    $counter = 1;
+                    $uniqueName = $baseName;
+                    
+                    while (Sheet::where('file_id', $fileRecord->id)->where('name', $uniqueName)->exists()) {
+                        $uniqueName = $baseName . ' (' . $counter . ')';
+                        $counter++;
+                    }
+                    
+                    // Create sheet record
+                    $sheet = Sheet::create([
+                        'file_id' => $fileRecord->id,
+                        'name' => $uniqueName,
+                        'order' => $sheetIndex,
+                    ]);
 
-                $importedSheets++;
+                    $importedSheets++;
+                    $sheetRowCount = 0;
 
-                // Import rows
-                foreach ($sheetData as $rowIndex => $row) {
-                    if (!is_array($row)) continue;
+                    // Import rows with proper data handling
+                    foreach ($sheetData as $rowIndex => $row) {
+                        // Debug: Log every row for analysis
+                        Log::info("Processing row", [
+                            'rowIndex' => $rowIndex,
+                            'rowType' => gettype($row),
+                            'rowIsArray' => is_array($row),
+                            'rowCount' => is_array($row) ? count($row) : 'N/A',
+                            'rowSample' => is_array($row) ? array_slice($row, 0, 3) : $row
+                        ]);
+                        
+                        if (!is_array($row)) {
+                            Log::warning("Skipping non-array row", ['rowIndex' => $rowIndex, 'row' => $row]);
+                            continue;
+                        }
 
-                    $cleanRow = [];
-                    $allEmpty = true;
+                        // Simple row processing - always save non-empty rows
+                        $cleanRow = [];
+                        $hasContent = false;
+                        
+                        foreach ($row as $cellIndex => $cell) {
+                            $value = trim($cell ?? '');
+                            $cleanRow[] = $value;
+                            if ($value !== '') {
+                                $hasContent = true;
+                            }
+                        }
 
-                    foreach ($row as $cell) {
-                        $value = trim($cell ?? '');
-                        $cleanRow[] = $value;
-                        if ($value !== '') {
-                            $allEmpty = false;
+                        // Debug: Log row processing details
+                        Log::info("Row processed", [
+                            'rowIndex' => $rowIndex,
+                            'cleanRow' => $cleanRow,
+                            'hasContent' => $hasContent,
+                            'willSave' => ($hasContent || $rowIndex === 0) // Always save header row
+                        ]);
+
+                        // Save row if it has content or is the header row
+                        if ($hasContent || $rowIndex === 0) {
+                            // Debug: Log row being saved
+                            Log::info("Saving row", [
+                                'sheetId' => $sheet->id,
+                                'rowIndex' => $rowIndex,
+                                'cleanRow' => $cleanRow,
+                                'rowData' => json_encode($cleanRow)
+                            ]);
+
+                            // Create sheet row with the actual data
+                            $sheetRow = SheetRow::create([
+                                'sheet_id' => $sheet->id,
+                                'sheet_data' => json_encode($cleanRow),
+                            ]);
+                            
+                            // Debug: Verify row was created
+                            Log::info("Row created", [
+                                'sheetRowId' => $sheetRow->id,
+                                'sheetId' => $sheetRow->sheet_id,
+                                'dataSaved' => $sheetRow->sheet_data
+                            ]);
+                            
+                            $importedRows++;
+                            $sheetRowCount++;
+                        } else {
+                            Log::info("Skipping empty row", ['rowIndex' => $rowIndex]);
                         }
                     }
-
-                    // Skip empty rows (except header row)
-                    if ($allEmpty && $rowIndex !== 0) continue;
-
-                    SheetRow::create([
-                        'sheet_id' => $sheet->id,
-                        'sheet_data' => json_encode($cleanRow),
-                    ]);
-                    $importedRows++;
+                    
+                    // Log sheet import details
+                    Log::info("Imported sheet '{$uniqueName}' with {$sheetRowCount} rows");
+                    
+                } catch (\Exception $e) {
+                    $sheetNumber = $sheetIndex + 1;
+                    $errors[] = "Error importing sheet {$sheetNumber}: " . $e->getMessage();
+                    Log::error("Sheet import error: " . $e->getMessage());
                 }
             }
 
             // Clean up temporary file
             \Illuminate\Support\Facades\Storage::delete($path);
 
+            // Clean up empty sheets (sheets with no rows)
+            $emptySheets = Sheet::where('file_id', $fileRecord->id)
+                ->whereDoesntHave('rows')
+                ->get();
+                
+            foreach ($emptySheets as $emptySheet) {
+                $emptySheet->delete();
+                $importedSheets--; // Adjust count since we're removing empty sheets
+            }
+
             DB::commit();
 
+            $message = "Successfully imported {$importedSheets} sheet(s) with {$importedRows} row(s).";
+            if (!empty($errors)) {
+                $message .= " Errors: " . implode(', ', $errors);
+            }
+
+            // Debug: Final verification
+            Log::info("Import completed", [
+                'fileId' => $fileRecord->id,
+                'importedSheets' => $importedSheets,
+                'importedRows' => $importedRows,
+                'finalSheetCount' => Sheet::where('file_id', $fileRecord->id)->count(),
+                'finalRowCount' => SheetRow::whereHas('sheet', function($q) use ($fileRecord) {
+                    $q->where('file_id', $fileRecord->id);
+                })->count()
+            ]);
+
             return response()->json([
-                'message' => "Successfully imported {$importedSheets} sheet(s) with {$importedRows} row(s).",
+                'message' => $message,
                 'file_id' => $fileRecord->id,
                 'file_name' => $fileName,
+                'imported_sheets' => $importedSheets,
+                'imported_rows' => $importedRows,
+                'errors' => $errors,
             ], 200);
 
         } catch (\Exception $e) {
             DB::rollBack();
+            // Clean up temporary file if it exists
+            if (isset($path) && \Illuminate\Support\Facades\Storage::exists($path)) {
+                \Illuminate\Support\Facades\Storage::delete($path);
+            }
+            
+            Log::error("Excel import failed: " . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to import Excel file: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Test method to debug import functionality
+     */
+    public function testImport()
+    {
+        try {
+            // Test basic database operations
+            $testFile = File::create([
+                'name' => 'TEST_FILE_' . time(),
+                'user_id' => Auth::id() ?? 1,
+            ]);
+            
+            $testSheet = Sheet::create([
+                'file_id' => $testFile->id,
+                'name' => 'TEST_SHEET',
+                'order' => 0,
+            ]);
+            
+            $testRow = SheetRow::create([
+                'sheet_id' => $testSheet->id,
+                'sheet_data' => json_encode(['Test', 'Data', 'Row']),
+            ]);
+            
+            // Verify data was created
+            $verification = [
+                'file_created' => $testFile->id,
+                'sheet_created' => $testSheet->id,
+                'row_created' => $testRow->id,
+                'row_data' => $testRow->sheet_data,
+                'database_connection' => 'OK'
+            ];
+            
+            // Clean up test data
+            $testRow->delete();
+            $testSheet->delete();
+            $testFile->delete();
+            
+            return response()->json([
+                'message' => 'Test successful',
+                'verification' => $verification
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Test failed: ' . $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ], 500);
         }
     }

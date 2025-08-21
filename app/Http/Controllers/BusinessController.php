@@ -21,6 +21,22 @@ class BusinessController extends Controller
     {
         // dd($business);
         $sheets = $business->sheets()->orderBy('order')->get()->map(function ($sheet) {
+            // Prefer persisted Luckysheet structure if available (data or celldata or config)
+            if (!empty($sheet->data) || !empty($sheet->celldata) || !empty($sheet->config)) {
+                $decodedData = is_string($sheet->data) ? json_decode($sheet->data, true) : ($sheet->data ?? []);
+                $decodedConfig = is_string($sheet->config) ? json_decode($sheet->config, true) : ($sheet->config ?? ['rowlen' => [], 'columnlen' => []]);
+                $decodedCelldata = is_string($sheet->celldata) ? json_decode($sheet->celldata, true) : ($sheet->celldata ?? []);
+                return [
+                    'id' => $sheet->id,
+                    'name' => $sheet->name,
+                    'data' => $decodedData,
+                    'config' => $decodedConfig,
+                    'celldata' => $decodedCelldata,
+                    'order' => $sheet->order,
+                ];
+            }
+
+            // Fallback to legacy rows storage
             $rows = $sheet->rows->map(function ($row) {
                 return array_map(function ($value) {
                     return ['v' => $value];
@@ -28,12 +44,14 @@ class BusinessController extends Controller
             })->toArray();
 
             return [
+                'id' => $sheet->id,
                 'name' => $sheet->name,
                 'data' => $rows,
                 'config' => [
                     'rowlen' => array_fill(0, count($rows), 30),
                     'columnlen' => array_fill(0, count($rows[0] ?? []), 200),
                 ],
+                'celldata' => [],
                 'order' => $sheet->order,
             ];
         })->toArray();

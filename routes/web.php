@@ -189,6 +189,7 @@ Route::controller(SheetController::class)->group(function () {
     Route::get('/files/{id}/sheets', 'getSheetsByFile');
     Route::delete('/sheets/{id}', 'deleteSheet')->name('sheets.delete');
     Route::get('/export/{file}/{type}', 'export')->name('sheets.export');
+    Route::get('/test-import', 'testImport')->name('sheets.test'); // Test route for debugging
 });
 
 // Excel Import Routes
