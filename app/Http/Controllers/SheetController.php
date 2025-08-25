@@ -135,13 +135,26 @@ class SheetController extends Controller
                     if (!is_array($row)) continue;
 
                     $cleanRow = [];
+                    $formatRow = [];
                     $allEmpty = true;
 
-                    foreach ($row as $cell) {
-                        $value = is_array($cell) && isset($cell['v']) ? trim($cell['v']) : '';
-                        $cleanRow[] = $value;
+                    foreach ($row as $colIndex => $cell) {
+                        $value = is_array($cell) && array_key_exists('v', $cell) ? trim((string)$cell['v']) : '';
                         if ($value !== '') {
+                            $cleanRow[(string)$colIndex] = $value; // sparse map colIndex => value
                             $allEmpty = false;
+                        }
+                        // Capture formatting only for this cell if present
+                        if (is_array($cell)) {
+                            $format = [];
+                            foreach (['ct','bg','fc','bl','it','un','ff','fs','ht','vt','tb','tr'] as $key) {
+                                if (array_key_exists($key, $cell)) {
+                                    $format[$key] = $cell[$key];
+                                }
+                            }
+                            if (!empty($format)) {
+                                $formatRow[(string)$colIndex] = $format; // sparse map colIndex => format
+                            }
                         }
                     }
 
@@ -149,7 +162,8 @@ class SheetController extends Controller
 
                     SheetRow::create([
                         'sheet_id' => $sheet->id,
-                        'sheet_data' => json_encode($cleanRow),
+                        'sheet_data' => $cleanRow, // sparse map
+                        'cell_formatting' => !empty($formatRow) ? $formatRow : null,
                     ]);
                 }
             }
@@ -178,7 +192,7 @@ class SheetController extends Controller
         return response()->json([
             'sheet_name' => $sheet->name,
             'rows' => $sheet->rows->map(function ($row) {
-                return json_decode($row->sheet_data, true);
+                return $row->sheet_data;
             })->toArray(),
         ]);
     }
@@ -187,9 +201,24 @@ class SheetController extends Controller
     {
         $sheets = $file->sheets()->orderBy('order')->get()->map(function ($sheet) {
             $rows = $sheet->rows->map(function ($row) {
-                return array_map(function ($value) {
-                    return ['v' => $value];
-                }, json_decode($row->sheet_data, true));
+                // Reconstruct row from sparse maps: sheet_data[colIndex] => value, cell_formatting[colIndex] => format
+                $values = is_array($row->sheet_data) ? $row->sheet_data : [];
+                $formats = is_array($row->cell_formatting) ? $row->cell_formatting : [];
+
+                // Determine max column index present
+                $colIndices = array_map('intval', array_unique(array_merge(array_keys($values), array_keys($formats))));
+                $maxCol = empty($colIndices) ? -1 : max($colIndices);
+                $cells = [];
+                for ($i = 0; $i <= $maxCol; $i++) {
+                    $cell = ['v' => isset($values[(string)$i]) ? $values[(string)$i] : ''];
+                    if (isset($formats[(string)$i]) && is_array($formats[(string)$i])) {
+                        foreach ($formats[(string)$i] as $k => $v) {
+                            $cell[$k] = $v;
+                        }
+                    }
+                    $cells[] = $cell;
+                }
+                return $cells;
             })->toArray();
 
             return [
@@ -503,7 +532,7 @@ class SheetController extends Controller
             $exportData = [];
             foreach ($sheets as $sheet) {
                 $rows = $sheet->rows->map(function ($row) {
-                    return json_decode($row->sheet_data, true);
+                    return $row->sheet_data;
                 })->toArray();
                 
                 $exportData[$sheet->name] = $rows;

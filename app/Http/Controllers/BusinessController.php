@@ -26,6 +26,23 @@ class BusinessController extends Controller
                 $decodedData = is_string($sheet->data) ? json_decode($sheet->data, true) : ($sheet->data ?? []);
                 $decodedConfig = is_string($sheet->config) ? json_decode($sheet->config, true) : ($sheet->config ?? ['rowlen' => [], 'columnlen' => []]);
                 $decodedCelldata = is_string($sheet->celldata) ? json_decode($sheet->celldata, true) : ($sheet->celldata ?? []);
+
+                // Normalize to Luckysheet cell objects { v: value }
+                if (is_array($decodedData)) {
+                    $decodedData = array_map(function ($row) {
+                        if (!is_array($row)) return [];
+                        return array_map(function ($cell) {
+                            return (is_array($cell) && array_key_exists('v', $cell)) ? $cell : ['v' => (string)$cell];
+                        }, $row);
+                    }, $decodedData);
+                }
+
+                // Ensure config sizes
+                $maxCols = 0;
+                foreach ($decodedData as $row) { $maxCols = max($maxCols, is_array($row) ? count($row) : 0); }
+                if (empty($decodedConfig['columnlen'])) { $decodedConfig['columnlen'] = array_fill(0, $maxCols, 200); }
+                if (empty($decodedConfig['rowlen'])) { $decodedConfig['rowlen'] = array_fill(0, count($decodedData), 30); }
+
                 return [
                     'id' => $sheet->id,
                     'name' => $sheet->name,
@@ -36,20 +53,53 @@ class BusinessController extends Controller
                 ];
             }
 
-            // Fallback to legacy rows storage
+            // Fallback to legacy or sparse rows storage
             $rows = $sheet->rows->map(function ($row) {
-                return array_map(function ($value) {
-                    return ['v' => $value];
-                }, json_decode($row->sheet_data, true));
+                $values = is_array($row->sheet_data)
+                    ? $row->sheet_data
+                    : (is_string($row->sheet_data) ? (json_decode($row->sheet_data, true) ?: []) : []);
+                $formats = is_array($row->cell_formatting)
+                    ? $row->cell_formatting
+                    : (is_string($row->cell_formatting) ? (json_decode($row->cell_formatting, true) ?: []) : []);
+
+                // If associative (sparse), reconstruct contiguous row from max col index
+                $isAssoc = array_keys($values) !== range(0, count($values) - 1);
+                if ($isAssoc) {
+                    $colIndices = array_map('intval', array_unique(array_merge(array_keys($values), array_keys($formats))));
+                    $maxCol = empty($colIndices) ? -1 : max($colIndices);
+                    $cells = [];
+                    for ($i = 0; $i <= $maxCol; $i++) {
+                        $cell = ['v' => isset($values[(string)$i]) ? $values[(string)$i] : ''];
+                        if (isset($formats[(string)$i]) && is_array($formats[(string)$i])) {
+                            foreach ($formats[(string)$i] as $k => $v) { $cell[$k] = $v; }
+                        }
+                        $cells[] = $cell;
+                    }
+                    return $cells;
+                }
+
+                // Otherwise, dense array of values; still merge any formatting by index if present
+                $cells = [];
+                $count = count($values);
+                for ($i = 0; $i < $count; $i++) {
+                    $cell = ['v' => $values[$i] ?? ''];
+                    if (isset($formats[$i]) && is_array($formats[$i])) {
+                        foreach ($formats[$i] as $k => $v) { $cell[$k] = $v; }
+                    }
+                    $cells[] = $cell;
+                }
+                return $cells;
             })->toArray();
 
+            // Compute column count from widest row
+            $maxCols = 0; foreach ($rows as $row) { $maxCols = max($maxCols, is_array($row) ? count($row) : 0); }
             return [
                 'id' => $sheet->id,
                 'name' => $sheet->name,
                 'data' => $rows,
                 'config' => [
                     'rowlen' => array_fill(0, count($rows), 30),
-                    'columnlen' => array_fill(0, count($rows[0] ?? []), 200),
+                    'columnlen' => array_fill(0, $maxCols, 200),
                 ],
                 'celldata' => [],
                 'order' => $sheet->order,

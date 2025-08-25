@@ -118,7 +118,7 @@ class ExcelImportController extends Controller
                             if (!empty($cleanRow)) {
                                 SheetRow::create([
                                     'sheet_id' => $sheet->id,
-                                    'sheet_data' => json_encode($cleanRow),
+                                    'sheet_data' => $cleanRow,
                                 ]);
                                 $importedRows++;
                             }
@@ -156,7 +156,7 @@ class ExcelImportController extends Controller
     {
         $sheets = $file->sheets()->orderBy('order')->get()->map(function ($sheet) {
             $rows = $sheet->rows->map(function ($row) {
-                return json_decode($row->sheet_data, true);
+                return is_array($row->sheet_data) ? $row->sheet_data : [];
             })->toArray();
 
             return [
@@ -196,7 +196,7 @@ class ExcelImportController extends Controller
                 }
 
                 $rows = $sheetModel->rows->map(function ($row) {
-                    return json_decode($row->sheet_data, true);
+                    return is_array($row->sheet_data) ? $row->sheet_data : [];
                 })->toArray();
 
                 // Write values starting at A1
@@ -234,7 +234,7 @@ class ExcelImportController extends Controller
         $exportData = [];
         foreach ($sheets as $sheet) {
             $rows = $sheet->rows->map(function ($row) {
-                return json_decode($row->sheet_data, true);
+                return is_array($row->sheet_data) ? $row->sheet_data : [];
             })->toArray();
             $exportData[$sheet->name] = $rows;
         }

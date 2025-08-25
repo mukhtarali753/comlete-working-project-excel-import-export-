@@ -295,12 +295,17 @@ $(document).ready(function() {
 
     // Mark modified and autosave on edits
     if (luckysheet && typeof luckysheet.on === 'function') {
-        luckysheet.on('cellEdited', function() {
+        const markModified = function() {
             const allSheets = luckysheet.getAllSheets();
             const activeSheetIndex = luckysheet.getActiveSheetIndex();
             allSheets[activeSheetIndex].__modified = true;
             scheduleAutoSave();
-        });
+        };
+
+        luckysheet.on('cellEdited', markModified);
+        luckysheet.on('updated', markModified);
+        luckysheet.on('cellMousedown', function() {});
+        // Hook common toolbar actions that affect formatting via keydown already
     }
 
     // Keyboard shortcuts: Ctrl/Cmd+S to save, and autosave on common edit keys
