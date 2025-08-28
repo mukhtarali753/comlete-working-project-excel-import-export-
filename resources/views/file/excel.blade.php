@@ -49,9 +49,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="historyModalLabel">Change History</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="table-responsive">
@@ -72,14 +70,14 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
 </div>
 
 {{-- Bootstrap JS (required for dropdowns) --}}
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 {{-- Luckysheet and dependencies --}}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
@@ -96,9 +94,9 @@
 
 <script>
 $(document).ready(function() {
-    const initialSheets = @json($sheets ?? []);
-    let fileId = @json($file->id ?? null);
-    let isImporting = @json(!isset($file) ? true : false);
+    var initialSheets = @json($sheets ?? []);
+    var fileId = @json($file->id ?? null);
+    var isImporting = @json(!isset($file) ? true : false);
 
     // Update header text based on import status
     function updateHeaderText() {
@@ -111,17 +109,33 @@ $(document).ready(function() {
     }
 
     // Function to create a blank sheet
-    function createBlankSheet(rows = 16, cols = 26) {
-        const blankData = Array.from({ length: rows }, () =>
-            Array.from({ length: cols }, () => ({ v: "" }))
-        );
+    function createBlankSheet(rows, cols) {
+        rows = rows || 16;
+        cols = cols || 26;
+        var blankData = [];
+        for (var i = 0; i < rows; i++) {
+            var row = [];
+            for (var j = 0; j < cols; j++) {
+                row.push({ v: "" });
+            }
+            blankData.push(row);
+        }
+
+        var rowlen = {};
+        var columnlen = {};
+        for (var k = 0; k < rows; k++) {
+            rowlen[k] = 30;
+        }
+        for (var l = 0; l < cols; l++) {
+            columnlen[l] = 200;
+        }
 
         return {
             name: "Sheet1",
             data: blankData,
             config: {
-                rowlen: Object.fromEntries([...Array(rows).keys()].map(i => [i, 30])),
-                columnlen: Object.fromEntries([...Array(cols).keys()].map(j => [j, 200]))
+                rowlen: rowlen,
+                columnlen: columnlen
             },
             order: 0,
             status: 1,
@@ -138,9 +152,10 @@ $(document).ready(function() {
         }
 
         // Format sheets data to include IDs if they exist
-        const formattedSheets = sheets.map(sheet => {
-            const hasCellData = Array.isArray(sheet.celldata) && sheet.celldata.length > 0;
-            const sheetData = {
+        var formattedSheets = [];
+        $.each(sheets, function(index, sheet) {
+            var hasCellData = $.isArray(sheet.celldata) && sheet.celldata.length > 0;
+            var sheetData = {
                 name: sheet.name,
                 order: sheet.order,
                 status: 1,
@@ -149,14 +164,14 @@ $(document).ready(function() {
             if (hasCellData) {
                 sheetData.celldata = sheet.celldata;
             } else {
-                sheetData.data = Array.isArray(sheet.data) ? sheet.data : (typeof sheet.data === 'string' ? JSON.parse(sheet.data) : []);
+                sheetData.data = $.isArray(sheet.data) ? sheet.data : (typeof sheet.data === 'string' ? JSON.parse(sheet.data) : []);
             }
             
             if (sheet.id) {
                 sheetData.id = sheet.id;
             }
             
-            return sheetData;
+            formattedSheets.push(sheetData);
         });
 
         luckysheet.destroy();
@@ -194,17 +209,17 @@ $(document).ready(function() {
 
     // Function to handle sheet deletion
     function deleteSheet(sheetIndex) {
-        const allSheets = luckysheet.getAllSheets();
-        const sheetToDelete = allSheets[sheetIndex];
+        var allSheets = luckysheet.getAllSheets();
+        var sheetToDelete = allSheets[sheetIndex];
         
-        if (!confirm(`Are you sure you want to delete "${sheetToDelete.name}"?`)) {
+        if (!confirm('Are you sure you want to delete "' + sheetToDelete.name + '"?')) {
             return;
         }
 
         // If the sheet exists in the database (has an ID), send delete request
         if (sheetToDelete.id && fileId) {
             $.ajax({
-                url: `/sheets/${sheetToDelete.id}`,
+                url: '/sheets/' + sheetToDelete.id,
                 type: 'DELETE',
                 headers: {
                     'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
@@ -215,7 +230,13 @@ $(document).ready(function() {
                     alert(response.message);
                 },
                 error: function(xhr) {
-                    alert('Failed to delete sheet: ' + (xhr.responseJSON?.message || xhr.statusText));
+                    var errorMsg = 'Failed to delete sheet';
+                    if (xhr.responseJSON && xhr.responseJSON.message) {
+                        errorMsg += ': ' + xhr.responseJSON.message;
+                    } else if (xhr.statusText) {
+                        errorMsg += ': ' + xhr.statusText;
+                    }
+                    alert(errorMsg);
                 }
             });
         } else {
@@ -234,27 +255,44 @@ $(document).ready(function() {
         window.sheetCount++;
 
         // Get current sheets with their data preserved
-        const currentSheets = luckysheet.getAllSheets();
-        const existingNames = currentSheets.map(s => s.name.toLowerCase());
-        let newSheetName = `Sheet${window.sheetCount}`;
+        var currentSheets = luckysheet.getAllSheets();
+        var existingNames = [];
+        $.each(currentSheets, function(index, sheet) {
+            existingNames.push(sheet.name.toLowerCase());
+        });
+        var newSheetName = 'Sheet' + window.sheetCount;
 
-        while (existingNames.includes(newSheetName.toLowerCase())) {
+        while ($.inArray(newSheetName.toLowerCase(), existingNames) !== -1) {
             window.sheetCount++;
-            newSheetName = `Sheet${window.sheetCount}`;
+            newSheetName = 'Sheet' + window.sheetCount;
         }
 
-        const blankRows = 16;
-        const blankCols = 26;
-        const newSheetData = Array.from({ length: blankRows }, () =>
-            Array.from({ length: blankCols }, () => ({ v: "" }))
-        );
+        var blankRows = 16;
+        var blankCols = 26;
+        var newSheetData = [];
+        for (var i = 0; i < blankRows; i++) {
+            var row = [];
+            for (var j = 0; j < blankCols; j++) {
+                row.push({ v: "" });
+            }
+            newSheetData.push(row);
+        }
 
-        const newSheet = {
+        var rowlen = {};
+        var columnlen = {};
+        for (var k = 0; k < blankRows; k++) {
+            rowlen[k] = 30;
+        }
+        for (var l = 0; l < blankCols; l++) {
+            columnlen[l] = 200;
+        }
+
+        var newSheet = {
             name: newSheetName,
             data: newSheetData,
             config: {
-                rowlen: Object.fromEntries([...Array(blankRows).keys()].map(i => [i, 30])),
-                columnlen: Object.fromEntries([...Array(blankCols).keys()].map(j => [j, 200]))
+                rowlen: rowlen,
+                columnlen: columnlen
             },
             order: currentSheets.length,
             status: 1,
@@ -269,30 +307,37 @@ $(document).ready(function() {
         initializeLuckysheet(currentSheets);
         
         // Switch to the new sheet after a small delay to ensure initialization is complete
-        setTimeout(() => {
+        setTimeout(function() {
             luckysheet.setSheetActive(currentSheets.length - 1);
         }, 100);
     });
 
     function buildSavePayload() {
-        const allSheets = luckysheet.getAllSheets();
-        const fileName = $('#fileNameInput').val().trim() || `sheet_${new Date().toISOString().slice(0,10)}`;
-        return {
-            name: fileName,
-            sheets: allSheets.map(sheet => ({
+        var allSheets = luckysheet.getAllSheets();
+        var fileName = $('#fileNameInput').val().trim() || 'sheet_' + new Date().toISOString().slice(0,10);
+        var sheets = [];
+        
+        $.each(allSheets, function(index, sheet) {
+            sheets.push({
                 name: sheet.name,
                 data: JSON.stringify(sheet.data),
                 config: JSON.stringify(sheet.config || {}),
                 celldata: JSON.stringify(sheet.celldata || []),
                 order: sheet.order,
                 id: sheet.id || null
-            })),
+            });
+        });
+        
+        return {
+            name: fileName,
+            sheets: sheets,
             file_id: fileId || null
         };
     }
 
-    function saveNow(isAuto = false) {
-        const payload = buildSavePayload();
+    function saveNow(isAuto) {
+        isAuto = isAuto || false;
+        var payload = buildSavePayload();
         $.ajax({
             url: '{{ route("sheets.save") }}',
             type: 'POST',
@@ -306,16 +351,18 @@ $(document).ready(function() {
                 if (!fileId && response.file_id) {
                     fileId = response.file_id;
                     $('#historyBtn').prop('disabled', false);
-                    window.history.replaceState({}, '', `/excel-preview/${response.file_id}`);
+                    window.history.replaceState({}, '', '/excel-preview/' + response.file_id);
                 }
                 if (response.sheets) {
-                    const updatedSheets = luckysheet.getAllSheets().map((sheet, index) => {
+                    var updatedSheets = [];
+                    var allSheets = luckysheet.getAllSheets();
+                    $.each(allSheets, function(index, sheet) {
                         if (sheet.__isNew && response.sheets[index]) {
                             sheet.id = response.sheets[index].id;
                             delete sheet.__isNew;
                         }
                         delete sheet.__modified;
-                        return sheet;
+                        updatedSheets.push(sheet);
                     });
                     initializeLuckysheet(updatedSheets);
                 }
@@ -323,10 +370,10 @@ $(document).ready(function() {
         });
     }
 
-    let autoSaveTimer = null;
+    var autoSaveTimer = null;
     function scheduleAutoSave() {
         if (autoSaveTimer) clearTimeout(autoSaveTimer);
-        autoSaveTimer = setTimeout(() => saveNow(true), 1500);
+        autoSaveTimer = setTimeout(function() { saveNow(true); }, 1500);
     }
 
     // Save data button handler
@@ -334,14 +381,14 @@ $(document).ready(function() {
 
     // Mark modified and autosave on edits + capture history
     if (luckysheet && typeof luckysheet.on === 'function') {
-        const historyBuffer = [];
-        let historyTimer = null;
+        var historyBuffer = [];
+        var historyTimer = null;
 
         function toA1(colIndex, rowIndex) {
-            let col = '';
-            let x = (colIndex || 0) + 1;
+            var col = '';
+            var x = (colIndex || 0) + 1;
             while (x > 0) {
-                const mod = (x - 1) % 26;
+                var mod = (x - 1) % 26;
                 col = String.fromCharCode(65 + mod) + col;
                 x = Math.floor((x - mod) / 26) - 1;
             }
@@ -357,7 +404,7 @@ $(document).ready(function() {
             historyBuffer.push(change);
             if (historyTimer) clearTimeout(historyTimer);
             historyTimer = setTimeout(function() {
-                const payload = { file_id: fileId, changes: historyBuffer.splice(0) };
+                var payload = { file_id: fileId, changes: historyBuffer.splice(0) };
                 $.ajax({
                     url: '{{ route("history.store") }}',
                     type: 'POST',
@@ -377,9 +424,9 @@ $(document).ready(function() {
             }, 800);
         }
 
-        const markModified = function() {
-            const allSheets = luckysheet.getAllSheets();
-            const activeSheetIndex = luckysheet.getActiveSheetIndex();
+        var markModified = function() {
+            var allSheets = luckysheet.getAllSheets();
+            var activeSheetIndex = luckysheet.getActiveSheetIndex();
             allSheets[activeSheetIndex].__modified = true;
             scheduleAutoSave();
         };
@@ -410,12 +457,12 @@ $(document).ready(function() {
                 console.debug('updated event', operate);
                 markModified();
                 if (!operate) return;
-                const op = operate.op || operate.type || '';
-                const r = (operate.r !== undefined ? operate.r : (operate.row !== undefined ? operate.row : null));
-                const c = (operate.c !== undefined ? operate.c : (operate.col !== undefined ? operate.col : null));
-                const cell = (r !== null && c !== null) ? toA1(c, r) : (operate.cell || null);
-                const oldVal = (operate.old !== undefined) ? operate.old : (operate.oldValue !== undefined ? operate.oldValue : null);
-                const newVal = (operate.v !== undefined) ? operate.v : (operate.value !== undefined ? operate.value : (operate.newValue !== undefined ? operate.newValue : null));
+                var op = operate.op || operate.type || '';
+                var r = (operate.r !== undefined ? operate.r : (operate.row !== undefined ? operate.row : null));
+                var c = (operate.c !== undefined ? operate.c : (operate.col !== undefined ? operate.col : null));
+                var cell = (r !== null && c !== null) ? toA1(c, r) : (operate.cell || null);
+                var oldVal = (operate.old !== undefined) ? operate.old : (operate.oldValue !== undefined ? operate.oldValue : null);
+                var newVal = (operate.v !== undefined) ? operate.v : (operate.value !== undefined ? operate.value : (operate.newValue !== undefined ? operate.newValue : null));
 
                 function labelFor(opcode) {
                     switch (opcode) {
@@ -445,7 +492,7 @@ $(document).ready(function() {
                     }
                 }
 
-                const change = {
+                var change = {
                     cell: cell,
                     change_type: labelFor(op),
                     old_value: oldVal,
@@ -460,15 +507,15 @@ $(document).ready(function() {
 
     // Keyboard shortcuts: Ctrl/Cmd+S to save, and autosave on common edit keys
     $(document).on('keydown', function(e) {
-        const key = (e.key || '').toLowerCase();
-        const ctrl = e.ctrlKey || e.metaKey;
+        var key = (e.key || '').toLowerCase();
+        var ctrl = e.ctrlKey || e.metaKey;
         if (ctrl && key === 's') {
             e.preventDefault();
             saveNow(false);
             return;
         }
         // Bold/Italic/Underline, Undo/Redo
-        if (ctrl && ['b','i','u','z','y'].includes(key)) {
+        if (ctrl && $.inArray(key, ['b','i','u','z','y']) !== -1) {
             scheduleAutoSave();
         }
         // Delete/Backspace edits
@@ -483,24 +530,31 @@ $(document).ready(function() {
 
     // Export button handler
     $('#exportBtn').on('click', function() {
-        const allSheets = luckysheet.getAllSheets();
-        const wb = XLSX.utils.book_new();
+        var allSheets = luckysheet.getAllSheets();
+        var wb = XLSX.utils.book_new();
         
         // Process each sheet
-        allSheets.forEach(sheet => {
+        $.each(allSheets, function(index, sheet) {
             // Get the sheet data and convert to 2D array
-            const sheetData = sheet.data.map(row => 
-                row ? row.map(cell => cell?.v || "") : []
-            );
+            var sheetData = [];
+            $.each(sheet.data, function(rowIndex, row) {
+                var newRow = [];
+                if (row) {
+                    $.each(row, function(cellIndex, cell) {
+                        newRow.push(cell && cell.v ? cell.v : "");
+                    });
+                }
+                sheetData.push(newRow);
+            });
             
             // Create worksheet and add to workbook
-            const ws = XLSX.utils.aoa_to_sheet(sheetData);
-            XLSX.utils.book_append_sheet(wb, ws, sheet.name || `Sheet${sheet.order + 1}`);
+            var ws = XLSX.utils.aoa_to_sheet(sheetData);
+            XLSX.utils.book_append_sheet(wb, ws, sheet.name || 'Sheet' + (sheet.order + 1));
         });
         
         // Generate file name and download
-        const fileName = $('#fileNameInput').val().trim() || 'export';
-        XLSX.writeFile(wb, `${fileName}.xlsx`);
+        var fileName = $('#fileNameInput').val().trim() || 'export';
+        XLSX.writeFile(wb, fileName + '.xlsx');
     });
 
 
@@ -514,7 +568,7 @@ $(document).ready(function() {
     // History button handler
     $('#historyBtn').on('click', function() {
         if (!fileId) return;
-        const $tbody = $('#historyTableBody');
+        var $tbody = $('#historyTableBody');
         $tbody.html('<tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>');
         $.getJSON('{{ route('history.get', ['fileId' => '__ID__']) }}'.replace('__ID__', fileId))
             .done(function(rows) {
@@ -522,21 +576,22 @@ $(document).ready(function() {
                     $tbody.html('<tr><td colspan="5" class="text-center text-muted">No history yet</td></tr>');
                     return;
                 }
-                const html = rows.map(function(r){
+                var html = '';
+                $.each(rows, function(index, r) {
                     function esc(v){
                         if (v === null || v === undefined) return '';
                         try { v = typeof v === 'string' ? v : JSON.stringify(v); } catch(_) {}
                         return $('<div>').text(v).html();
                     }
-                    const ts = r.created_at ? new Date(r.created_at).toLocaleString() : '';
-                    return '<tr>' +
+                    var ts = r.created_at ? new Date(r.created_at).toLocaleString() : '';
+                    html += '<tr>' +
                         '<td>' + esc(r.cell || '') + '</td>' +
                         '<td>' + esc(r.change_type || '') + '</td>' +
                         '<td>' + esc(r.old_value || '') + '</td>' +
                         '<td>' + esc(r.new_value || '') + '</td>' +
                         '<td>' + esc(ts) + '</td>' +
                     '</tr>';
-                }).join('');
+                });
                 $tbody.html(html);
             })
             .fail(function(xhr){
@@ -546,7 +601,29 @@ $(document).ready(function() {
                 $tbody.html('<tr><td colspan="5" class="text-center text-danger">' + msg + '</td></tr>');
             });
 
-        $('#historyModal').modal('show');
+        historyModal.show();
+    });
+
+    // History modal close button handlers - Bootstrap 5 with jQuery
+    var historyModal = new bootstrap.Modal(document.getElementById('historyModal'));
+    
+    // Close modal when clicking close button or secondary button
+    $('#historyModal .btn-close, #historyModal .btn-secondary').on('click', function() {
+        historyModal.hide();
+    });
+
+    // Close modal when clicking outside
+    $('#historyModal').on('click', function(e) {
+        if (e.target === this) {
+            historyModal.hide();
+        }
+    });
+
+    // Close modal on escape key
+    $(document).on('keydown', function(e) {
+        if (e.key === 'Escape' && $('#historyModal').hasClass('show')) {
+            historyModal.hide();
+        }
     });
 });
 </script>
