@@ -26,6 +26,9 @@
                 <button id="exportBtn" class="btn btn-sm btn-primary">
                     <i class="fas fa-file-export fa-sm"></i> Export
                 </button>
+                <button id="historyBtn" class="btn btn-sm btn-info" @if(!isset($file) || !($file->id ?? null)) disabled @endif>
+                    <i class="fas fa-history"></i> History
+                </button>
             </div>
         </div>
 
@@ -40,7 +43,40 @@
 {{-- CSRF token --}}
 <meta name="csrf-token" content="{{ csrf_token() }}">
 
-
+<!-- History Modal -->
+<div class="modal fade" id="historyModal" tabindex="-1" role="dialog" aria-labelledby="historyModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="historyModalLabel">Change History</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped table-bordered mb-0">
+                        <thead class="thead-light">
+                            <tr>
+                                <th style="white-space:nowrap">Cell</th>
+                                <th style="white-space:nowrap">Change Type</th>
+                                <th>Old Value</th>
+                                <th>New Value</th>
+                                <th style="white-space:nowrap">Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <tr><td colspan="5" class="text-center text-muted">No history yet</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 {{-- Bootstrap JS (required for dropdowns) --}}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -61,7 +97,7 @@
 <script>
 $(document).ready(function() {
     const initialSheets = @json($sheets ?? []);
-    const fileId = @json($file->id ?? null);
+    let fileId = @json($file->id ?? null);
     let isImporting = @json(!isset($file) ? true : false);
 
     // Update header text based on import status
@@ -268,6 +304,8 @@ $(document).ready(function() {
                 isImporting = false;
                 updateHeaderText();
                 if (!fileId && response.file_id) {
+                    fileId = response.file_id;
+                    $('#historyBtn').prop('disabled', false);
                     window.history.replaceState({}, '', `/excel-preview/${response.file_id}`);
                 }
                 if (response.sheets) {
@@ -294,8 +332,51 @@ $(document).ready(function() {
     // Save data button handler
     $('#saveSheetBtn').on('click', function() { saveNow(false); });
 
-    // Mark modified and autosave on edits
+    // Mark modified and autosave on edits + capture history
     if (luckysheet && typeof luckysheet.on === 'function') {
+        const historyBuffer = [];
+        let historyTimer = null;
+
+        function toA1(colIndex, rowIndex) {
+            let col = '';
+            let x = (colIndex || 0) + 1;
+            while (x > 0) {
+                const mod = (x - 1) % 26;
+                col = String.fromCharCode(65 + mod) + col;
+                x = Math.floor((x - mod) / 26) - 1;
+            }
+            return col + String(((rowIndex || 0) + 1));
+        }
+
+        function pushHistory(change) {
+            if (!change) return;
+            if (!fileId) return;
+            if (!change.change_type || (typeof change.change_type === 'string' && change.change_type.trim() === '')) {
+                change.change_type = 'update';
+            }
+            historyBuffer.push(change);
+            if (historyTimer) clearTimeout(historyTimer);
+            historyTimer = setTimeout(function() {
+                const payload = { file_id: fileId, changes: historyBuffer.splice(0) };
+                $.ajax({
+                    url: '{{ route("history.store") }}',
+                    type: 'POST',
+                    data: JSON.stringify(payload),
+                    contentType: 'application/json',
+                    headers: {
+                        'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content'),
+                        'Accept': 'application/json'
+                    }
+                }).done(function(res){
+                    // Uncomment for debugging: console.log('History saved', res);
+                }).fail(function(xhr){
+                    try {
+                        console.error('History save failed', xhr.status, xhr.responseText || xhr);
+                    } catch(e) {}
+                });
+            }, 800);
+        }
+
         const markModified = function() {
             const allSheets = luckysheet.getAllSheets();
             const activeSheetIndex = luckysheet.getActiveSheetIndex();
@@ -303,8 +384,76 @@ $(document).ready(function() {
             scheduleAutoSave();
         };
 
-        luckysheet.on('cellEdited', markModified);
-        luckysheet.on('updated', markModified);
+        luckysheet.on('cellEdited', function(payload) {
+            try {
+                // payload may include r,c,oldValue/newValue depending on version
+                // Log to help verify event firing
+                console.debug('cellEdited event', payload);
+                markModified();
+                var r = (payload && (payload.r !== undefined ? payload.r : payload.row));
+                var c = (payload && (payload.c !== undefined ? payload.c : payload.col));
+                var cell = (r !== undefined && c !== undefined) ? toA1(c, r) : null;
+                var oldVal = (payload && (payload.old !== undefined ? payload.old : payload.oldValue));
+                var newVal = (payload && (payload.v !== undefined ? payload.v : payload.value));
+                pushHistory({
+                    cell: cell,
+                    change_type: 'value change',
+                    old_value: oldVal,
+                    new_value: newVal
+                });
+            } catch(e) {
+                console.warn('cellEdited handler error', e);
+            }
+        });
+        luckysheet.on('updated', function(operate) {
+            try {
+                console.debug('updated event', operate);
+                markModified();
+                if (!operate) return;
+                const op = operate.op || operate.type || '';
+                const r = (operate.r !== undefined ? operate.r : (operate.row !== undefined ? operate.row : null));
+                const c = (operate.c !== undefined ? operate.c : (operate.col !== undefined ? operate.col : null));
+                const cell = (r !== null && c !== null) ? toA1(c, r) : (operate.cell || null);
+                const oldVal = (operate.old !== undefined) ? operate.old : (operate.oldValue !== undefined ? operate.oldValue : null);
+                const newVal = (operate.v !== undefined) ? operate.v : (operate.value !== undefined ? operate.value : (operate.newValue !== undefined ? operate.newValue : null));
+
+                function labelFor(opcode) {
+                    switch (opcode) {
+                        case 'v':
+                        case 'cellEdit':
+                            return 'value change';
+                        case 'bl':
+                        case 'bold':
+                            return 'bold';
+                        case 'it':
+                        case 'italic':
+                            return 'italic';
+                        case 'cl':
+                        case 'fc':
+                        case 'color':
+                            return 'color';
+                        case 'bgc':
+                        case 'bgcolor':
+                            return 'background';
+                        case 'strike':
+                            return 'strikethrough';
+                        case 'u':
+                        case 'underline':
+                            return 'underline';
+                        default:
+                            return opcode || 'update';
+                    }
+                }
+
+                const change = {
+                    cell: cell,
+                    change_type: labelFor(op),
+                    old_value: oldVal,
+                    new_value: newVal
+                };
+                pushHistory(change);
+            } catch (e) {}
+        });
         luckysheet.on('cellMousedown', function() {});
         // Hook common toolbar actions that affect formatting via keydown already
     }
@@ -360,6 +509,44 @@ $(document).ready(function() {
     $('#fileNameInput').on('input', function() {
         isImporting = false;
         updateHeaderText();
+    });
+
+    // History button handler
+    $('#historyBtn').on('click', function() {
+        if (!fileId) return;
+        const $tbody = $('#historyTableBody');
+        $tbody.html('<tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>');
+        $.getJSON('{{ route('history.get', ['fileId' => '__ID__']) }}'.replace('__ID__', fileId))
+            .done(function(rows) {
+                if (!rows || rows.length === 0) {
+                    $tbody.html('<tr><td colspan="5" class="text-center text-muted">No history yet</td></tr>');
+                    return;
+                }
+                const html = rows.map(function(r){
+                    function esc(v){
+                        if (v === null || v === undefined) return '';
+                        try { v = typeof v === 'string' ? v : JSON.stringify(v); } catch(_) {}
+                        return $('<div>').text(v).html();
+                    }
+                    const ts = r.created_at ? new Date(r.created_at).toLocaleString() : '';
+                    return '<tr>' +
+                        '<td>' + esc(r.cell || '') + '</td>' +
+                        '<td>' + esc(r.change_type || '') + '</td>' +
+                        '<td>' + esc(r.old_value || '') + '</td>' +
+                        '<td>' + esc(r.new_value || '') + '</td>' +
+                        '<td>' + esc(ts) + '</td>' +
+                    '</tr>';
+                }).join('');
+                $tbody.html(html);
+            })
+            .fail(function(xhr){
+                var msg = 'Failed to load history';
+                if (xhr && xhr.status) msg += ' (HTTP ' + xhr.status + ')';
+                if (xhr && xhr.responseJSON && xhr.responseJSON.message) msg += ': ' + xhr.responseJSON.message;
+                $tbody.html('<tr><td colspan="5" class="text-center text-danger">' + msg + '</td></tr>');
+            });
+
+        $('#historyModal').modal('show');
     });
 });
 </script>

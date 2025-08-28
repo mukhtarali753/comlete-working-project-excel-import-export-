@@ -22,6 +22,7 @@ use Maatwebsite\Excel\Facades\Excel;
 
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\SheetHistoryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -37,6 +38,10 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return view('welcome');
 });
+
+// Sheet history
+Route::post('/history/store', [SheetHistoryController::class, 'storeHistory'])->name('history.store');
+Route::get('/history/{fileId}', [SheetHistoryController::class, 'getHistory'])->name('history.get');
 
 Route::get('/dashboard', [ThemeController::class, 'index'])->middleware(['auth'])->name('dashboard');
 
