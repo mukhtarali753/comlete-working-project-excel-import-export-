@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use App\Models\SheetHistory;
 
 class SheetController extends Controller
 {
@@ -166,6 +167,37 @@ class SheetController extends Controller
                         'cell_formatting' => !empty($formatRow) ? $formatRow : null,
                     ]);
                 }
+
+                // Create a new sheet history version (compact payload)
+                // Store sparse celldata instead of full 2D data to reduce size
+                $historyPayload = [
+                    'name' => $sheetData['name'],
+                    'config' => isset($sheetData['config']) ? json_decode($sheetData['config'], true) : new \stdClass(),
+                    'celldata' => isset($sheetData['celldata']) ? json_decode($sheetData['celldata'], true) : [],
+                    'order' => $sheetData['order'] ?? 0,
+                ];
+
+                // Determine next version number per (file_id, sheet_id)
+                $latest = SheetHistory::where('file_id', $file->id)
+                    ->where('sheet_id', $sheet->id)
+                    ->orderByDesc('version_number')
+                    ->first();
+                $nextVersion = $latest ? ($latest->version_number + 1) : 1;
+
+                // Mark previous current as not current
+                SheetHistory::where('file_id', $file->id)
+                    ->where('sheet_id', $sheet->id)
+                    ->where('is_current', true)
+                    ->update(['is_current' => false]);
+
+                SheetHistory::create([
+                    'file_id' => $file->id,
+                    'sheet_id' => $sheet->id,
+                    'version_number' => $nextVersion,
+                    'is_current' => true,
+                    'data' => $historyPayload,
+                    'user_id' => Auth::check() ? Auth::id() : null,
+                ]);
             }
 
             // Note: We're not automatically deleting sheets that aren't in the current request
@@ -243,6 +275,13 @@ class SheetController extends Controller
             ->get(); 
 
         return response()->json(['files' => $files]);
+    }
+
+    public function getSheetsByFile($id)
+    {
+        $file = File::findOrFail($id);
+        $sheets = $file->sheets()->orderBy('order')->get(['id','name','order']);
+        return response()->json($sheets);
     }
 
     public function deleteSheet($id)

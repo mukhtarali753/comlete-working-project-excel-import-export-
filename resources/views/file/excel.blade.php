@@ -26,7 +26,7 @@
                 <button id="exportBtn" class="btn btn-sm btn-primary">
                     <i class="fas fa-file-export fa-sm"></i> Export
                 </button>
-                <button id="historyBtn" class="btn btn-sm btn-info" @if(!isset($file) || !($file->id ?? null)) disabled @endif>
+                <button id="historyBtn" class="btn btn-sm btn-secondary">
                     <i class="fas fa-history"></i> History
                 </button>
             </div>
@@ -42,39 +42,6 @@
 
 {{-- CSRF token --}}
 <meta name="csrf-token" content="{{ csrf_token() }}">
-
-<!-- History Modal -->
-<div class="modal fade" id="historyModal" tabindex="-1" role="dialog" aria-labelledby="historyModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="historyModalLabel">Change History</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div class="table-responsive">
-                    <table class="table table-sm table-striped table-bordered mb-0">
-                        <thead class="thead-light">
-                            <tr>
-                                <th style="white-space:nowrap">Cell</th>
-                                <th style="white-space:nowrap">Change Type</th>
-                                <th>Old Value</th>
-                                <th>New Value</th>
-                                <th style="white-space:nowrap">Timestamp</th>
-                            </tr>
-                        </thead>
-                        <tbody id="historyTableBody">
-                            <tr><td colspan="5" class="text-center text-muted">No history yet</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-            </div>
-        </div>
-    </div>
-</div>
 
 {{-- Bootstrap JS (required for dropdowns) --}}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -318,9 +285,36 @@ $(document).ready(function() {
         var sheets = [];
         
         $.each(allSheets, function(index, sheet) {
+            var data2D = sheet.data;
+            if (!Array.isArray(data2D) || data2D.length === 0) {
+                // Fallback: build from celldata if present
+                if (Array.isArray(sheet.celldata) && sheet.celldata.length > 0) {
+                    var maxRow = 0, maxCol = 0;
+                    sheet.celldata.forEach(function(cell){
+                        if (typeof cell.r === 'number' && typeof cell.c === 'number') {
+                            if (cell.r > maxRow) maxRow = cell.r;
+                            if (cell.c > maxCol) maxCol = cell.c;
+                        }
+                    });
+                    data2D = [];
+                    for (var r = 0; r <= maxRow; r++) {
+                        var row = [];
+                        for (var c = 0; c <= maxCol; c++) { row.push({ v: "" }); }
+                        data2D.push(row);
+                    }
+                    sheet.celldata.forEach(function(cell){
+                        if (data2D[cell.r] && data2D[cell.r][cell.c]) {
+                            data2D[cell.r][cell.c] = cell.v || { v: "" };
+                        }
+                    });
+                } else {
+                    data2D = [];
+                }
+            }
+
             sheets.push({
                 name: sheet.name,
-                data: JSON.stringify(sheet.data),
+                data: JSON.stringify(data2D),
                 config: JSON.stringify(sheet.config || {}),
                 celldata: JSON.stringify(sheet.celldata || []),
                 order: sheet.order,
@@ -350,7 +344,6 @@ $(document).ready(function() {
                 updateHeaderText();
                 if (!fileId && response.file_id) {
                     fileId = response.file_id;
-                    $('#historyBtn').prop('disabled', false);
                     window.history.replaceState({}, '', '/excel-preview/' + response.file_id);
                 }
                 if (response.sheets) {
@@ -366,6 +359,12 @@ $(document).ready(function() {
                     });
                     initializeLuckysheet(updatedSheets);
                 }
+            },
+            error: function(xhr) {
+                var msg = 'Save failed';
+                if (xhr.responseJSON && xhr.responseJSON.message) msg += ': ' + xhr.responseJSON.message;
+                else if (xhr.statusText) msg += ': ' + xhr.statusText;
+                alert(msg);
             }
         });
     }
@@ -379,51 +378,8 @@ $(document).ready(function() {
     // Save data button handler
     $('#saveSheetBtn').on('click', function() { saveNow(false); });
 
-    // Mark modified and autosave on edits + capture history
+    // Mark modified and autosave on edits
     if (luckysheet && typeof luckysheet.on === 'function') {
-        var historyBuffer = [];
-        var historyTimer = null;
-
-        function toA1(colIndex, rowIndex) {
-            var col = '';
-            var x = (colIndex || 0) + 1;
-            while (x > 0) {
-                var mod = (x - 1) % 26;
-                col = String.fromCharCode(65 + mod) + col;
-                x = Math.floor((x - mod) / 26) - 1;
-            }
-            return col + String(((rowIndex || 0) + 1));
-        }
-
-        function pushHistory(change) {
-            if (!change) return;
-            if (!fileId) return;
-            if (!change.change_type || (typeof change.change_type === 'string' && change.change_type.trim() === '')) {
-                change.change_type = 'update';
-            }
-            historyBuffer.push(change);
-            if (historyTimer) clearTimeout(historyTimer);
-            historyTimer = setTimeout(function() {
-                var payload = { file_id: fileId, changes: historyBuffer.splice(0) };
-                $.ajax({
-                    url: '{{ route("history.store") }}',
-                    type: 'POST',
-                    data: JSON.stringify(payload),
-                    contentType: 'application/json',
-                    headers: {
-                        'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content'),
-                        'Accept': 'application/json'
-                    }
-                }).done(function(res){
-                    // Uncomment for debugging: console.log('History saved', res);
-                }).fail(function(xhr){
-                    try {
-                        console.error('History save failed', xhr.status, xhr.responseText || xhr);
-                    } catch(e) {}
-                });
-            }, 800);
-        }
-
         var markModified = function() {
             var allSheets = luckysheet.getAllSheets();
             var activeSheetIndex = luckysheet.getActiveSheetIndex();
@@ -433,72 +389,12 @@ $(document).ready(function() {
 
         luckysheet.on('cellEdited', function(payload) {
             try {
-                // payload may include r,c,oldValue/newValue depending on version
-                // Log to help verify event firing
-                console.debug('cellEdited event', payload);
                 markModified();
-                var r = (payload && (payload.r !== undefined ? payload.r : payload.row));
-                var c = (payload && (payload.c !== undefined ? payload.c : payload.col));
-                var cell = (r !== undefined && c !== undefined) ? toA1(c, r) : null;
-                var oldVal = (payload && (payload.old !== undefined ? payload.old : payload.oldValue));
-                var newVal = (payload && (payload.v !== undefined ? payload.v : payload.value));
-                pushHistory({
-                    cell: cell,
-                    change_type: 'value change',
-                    old_value: oldVal,
-                    new_value: newVal
-                });
-            } catch(e) {
-                console.warn('cellEdited handler error', e);
-            }
+            } catch(e) {}
         });
         luckysheet.on('updated', function(operate) {
             try {
-                console.debug('updated event', operate);
                 markModified();
-                if (!operate) return;
-                var op = operate.op || operate.type || '';
-                var r = (operate.r !== undefined ? operate.r : (operate.row !== undefined ? operate.row : null));
-                var c = (operate.c !== undefined ? operate.c : (operate.col !== undefined ? operate.col : null));
-                var cell = (r !== null && c !== null) ? toA1(c, r) : (operate.cell || null);
-                var oldVal = (operate.old !== undefined) ? operate.old : (operate.oldValue !== undefined ? operate.oldValue : null);
-                var newVal = (operate.v !== undefined) ? operate.v : (operate.value !== undefined ? operate.value : (operate.newValue !== undefined ? operate.newValue : null));
-
-                function labelFor(opcode) {
-                    switch (opcode) {
-                        case 'v':
-                        case 'cellEdit':
-                            return 'value change';
-                        case 'bl':
-                        case 'bold':
-                            return 'bold';
-                        case 'it':
-                        case 'italic':
-                            return 'italic';
-                        case 'cl':
-                        case 'fc':
-                        case 'color':
-                            return 'color';
-                        case 'bgc':
-                        case 'bgcolor':
-                            return 'background';
-                        case 'strike':
-                            return 'strikethrough';
-                        case 'u':
-                        case 'underline':
-                            return 'underline';
-                        default:
-                            return opcode || 'update';
-                    }
-                }
-
-                var change = {
-                    cell: cell,
-                    change_type: labelFor(op),
-                    old_value: oldVal,
-                    new_value: newVal
-                };
-                pushHistory(change);
             } catch (e) {}
         });
         luckysheet.on('cellMousedown', function() {});
@@ -557,6 +453,130 @@ $(document).ready(function() {
         XLSX.writeFile(wb, fileName + '.xlsx');
     });
 
+    // ===== Version History Modal and Logic =====
+    function getActiveSheetMeta() {
+        var allSheets = luckysheet.getAllSheets();
+        var idx = luckysheet.getActiveSheetIndex();
+        var sheet = allSheets[idx];
+        return { id: sheet.id || null, name: sheet.name || '' };
+    }
+
+    function renderHistoryRows(histories) {
+        var rows = (histories || []).map(function(h) {
+            var badge = h.is_current ? '<span class="badge bg-success">Current</span>' : '';
+            var user = (h.user && h.user.name) ? h.user.name : (h.user_id || 'Unknown');
+            return '<tr>'+
+                '<td>v'+ h.version_number +'</td>'+
+                '<td>'+ user +'</td>'+
+                '<td>'+ (new Date(h.created_at)).toLocaleString() +'</td>'+
+                '<td>'+ badge +'</td>'+
+                '<td class="text-end">'+
+                    '<button class="btn btn-sm btn-outline-primary preview-history" data-id="'+h.id+'">Preview</button> '+
+                    (h.is_current ? '' : '<button class="btn btn-sm btn-outline-danger restore-history" data-id="'+h.id+'">Restore</button>')+
+                '</td>'+
+            '</tr>';
+        }).join('');
+        $('#historyTableBody').html(rows || '<tr><td colspan="5" class="text-center">No history yet</td></tr>');
+    }
+
+    function loadHistoryList() {
+        var sheetMeta = getActiveSheetMeta();
+        if (!fileId) {
+            $('#historyTableBody').html('<tr><td colspan="5" class="text-center">No file. Save first.</td></tr>');
+            return;
+        }
+        // If sheet id is missing, attempt to resolve by name from backend
+        if (!sheetMeta.id) {
+            $.getJSON('/files/' + fileId + '/sheets')
+                .done(function(res) {
+                    try {
+                        var list = res || [];
+                        var found = list.find(function(s){ return (s.name || '').toLowerCase() === (sheetMeta.name || '').toLowerCase(); });
+                        if (found && found.id) {
+                            // set id on the active sheet for future calls
+                            var allSheets = luckysheet.getAllSheets();
+                            var idx = luckysheet.getActiveSheetIndex();
+                            allSheets[idx].id = found.id;
+                            // proceed to load history
+                            $.getJSON('/history', { file_id: fileId, sheet_id: found.id })
+                                .done(function(res2) { renderHistoryRows(res2.histories || []); })
+                                .fail(function(xhr2) {
+                                    console.error('History load failed', xhr2);
+                                    $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Failed to load history</td></tr>');
+                                });
+                        } else {
+                            $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Sheet not saved yet. Click Save, then retry.</td></tr>');
+                        }
+                    } catch(e) {
+                        $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Error resolving sheet</td></tr>');
+                    }
+                })
+                .fail(function(xhr){
+                    console.error('Resolve sheet id failed', xhr);
+                    $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Failed to resolve sheet</td></tr>');
+                });
+            return;
+        }
+        $.getJSON('/history', { file_id: fileId, sheet_id: sheetMeta.id })
+            .done(function(res) { renderHistoryRows(res.histories || []); })
+            .fail(function(xhr) {
+                console.error('History load failed', xhr);
+                $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Failed to load history</td></tr>');
+            });
+    }
+
+    $('#historyBtn').on('click', function() {
+        var modalEl = document.getElementById('historyModal');
+        var modal = new bootstrap.Modal(modalEl);
+        // Show placeholder while loading
+        $('#historyTableBody').html('<tr><td colspan="5" class="text-center py-3">Loading...</td></tr>');
+        try {
+            loadHistoryList();
+        } catch (e) {
+            console.error('History click error', e);
+            $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Failed to load history</td></tr>');
+        }
+        modal.show();
+    });
+
+    $(document).on('click', '.preview-history', function() {
+        var id = $(this).data('id');
+        $.getJSON('/history/' + id)
+            .done(function(res) {
+                var payload = res.history.data || {};
+                var sheets = [{
+                    name: payload.name || 'Sheet',
+                    // Build from celldata if present, else use data
+                    data: Array.isArray(payload.data) ? payload.data : [],
+                    celldata: Array.isArray(payload.celldata) ? payload.celldata : [],
+                    config: payload.config || {},
+                    order: payload.order || 0,
+                    status: 1
+                }];
+                luckysheet.destroy();
+                luckysheet.create({ container: 'luckysheet', data: sheets, showinfobar: false, showtoolbar: true, showstatisticBar: false, showSheetBar: false, allowEdit: false });
+            })
+            .fail(function() { alert('Failed to load version'); });
+    });
+
+    $(document).on('click', '.restore-history', function() {
+        var id = $(this).data('id');
+        if (!confirm('Restore this version? This will create a new version as current.')) return;
+        $.ajax({
+            url: '/history/restore',
+            type: 'POST',
+            data: JSON.stringify({ history_id: id }),
+            contentType: 'application/json',
+            headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+        }).done(function() {
+            loadHistoryList();
+            alert('Version restored. Reloading current sheet view...');
+            initializeLuckysheet(luckysheet.getAllSheets());
+        }).fail(function(xhr){
+            alert('Failed to restore: ' + (xhr.responseJSON?.message || xhr.statusText));
+        });
+    });
+
 
 
     // Update header when file name changes
@@ -564,67 +584,7 @@ $(document).ready(function() {
         isImporting = false;
         updateHeaderText();
     });
-
-    // History button handler
-    $('#historyBtn').on('click', function() {
-        if (!fileId) return;
-        var $tbody = $('#historyTableBody');
-        $tbody.html('<tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>');
-        $.getJSON('{{ route('history.get', ['fileId' => '__ID__']) }}'.replace('__ID__', fileId))
-            .done(function(rows) {
-                if (!rows || rows.length === 0) {
-                    $tbody.html('<tr><td colspan="5" class="text-center text-muted">No history yet</td></tr>');
-                    return;
-                }
-                var html = '';
-                $.each(rows, function(index, r) {
-                    function esc(v){
-                        if (v === null || v === undefined) return '';
-                        try { v = typeof v === 'string' ? v : JSON.stringify(v); } catch(_) {}
-                        return $('<div>').text(v).html();
-                    }
-                    var ts = r.created_at ? new Date(r.created_at).toLocaleString() : '';
-                    html += '<tr>' +
-                        '<td>' + esc(r.cell || '') + '</td>' +
-                        '<td>' + esc(r.change_type || '') + '</td>' +
-                        '<td>' + esc(r.old_value || '') + '</td>' +
-                        '<td>' + esc(r.new_value || '') + '</td>' +
-                        '<td>' + esc(ts) + '</td>' +
-                    '</tr>';
-                });
-                $tbody.html(html);
-            })
-            .fail(function(xhr){
-                var msg = 'Failed to load history';
-                if (xhr && xhr.status) msg += ' (HTTP ' + xhr.status + ')';
-                if (xhr && xhr.responseJSON && xhr.responseJSON.message) msg += ': ' + xhr.responseJSON.message;
-                $tbody.html('<tr><td colspan="5" class="text-center text-danger">' + msg + '</td></tr>');
-            });
-
-        historyModal.show();
-    });
-
-    // History modal close button handlers - Bootstrap 5 with jQuery
-    var historyModal = new bootstrap.Modal(document.getElementById('historyModal'));
     
-    // Close modal when clicking close button or secondary button
-    $('#historyModal .btn-close, #historyModal .btn-secondary').on('click', function() {
-        historyModal.hide();
-    });
-
-    // Close modal when clicking outside
-    $('#historyModal').on('click', function(e) {
-        if (e.target === this) {
-            historyModal.hide();
-        }
-    });
-
-    // Close modal on escape key
-    $(document).on('keydown', function(e) {
-        if (e.key === 'Escape' && $('#historyModal').hasClass('show')) {
-            historyModal.hide();
-        }
-    });
 });
 </script>
 
@@ -687,4 +647,35 @@ $(document).ready(function() {
 
 
 </style>
+
+<!-- History Modal -->
+<div class="modal fade" id="historyModal" tabindex="-1" aria-labelledby="historyModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="historyModalLabel">Version History</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>Version</th>
+                                <th>User</th>
+                                <th>Created</th>
+                                <th>Status</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+    </div>
 @endsection

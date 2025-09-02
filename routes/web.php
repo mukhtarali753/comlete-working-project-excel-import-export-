@@ -39,9 +39,7 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-// Sheet history
-Route::post('/history/store', [SheetHistoryController::class, 'storeHistory'])->name('history.store');
-Route::get('/history/{fileId}', [SheetHistoryController::class, 'getHistory'])->name('history.get');
+// Sheet history removed
 
 Route::get('/dashboard', [ThemeController::class, 'index'])->middleware(['auth'])->name('dashboard');
 
@@ -195,6 +193,13 @@ Route::controller(SheetController::class)->group(function () {
     Route::delete('/sheets/{id}', 'deleteSheet')->name('sheets.delete');
     Route::get('/export/{file}/{type}', 'export')->name('sheets.export');
     Route::get('/test-import', 'testImport')->name('sheets.test'); // Test route for debugging
+});
+
+// Sheet history routes
+Route::prefix('history')->name('history.')->group(function () {
+    Route::get('/', [SheetHistoryController::class, 'index'])->name('index'); // file_id, sheet_id
+    Route::get('/{history}', [SheetHistoryController::class, 'show'])->name('show');
+    Route::post('/restore', [SheetHistoryController::class, 'restore'])->name('restore');
 });
 
 // Excel Import Routes

@@ -2,78 +2,81 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\File;
+use App\Models\Sheet;
 use App\Models\SheetHistory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 
 class SheetHistoryController extends Controller
 {
-    public function storeHistory(Request $request)
+    public function index(Request $request)
     {
-        Log::info('SheetHistory store request received', [
-            'content_type' => $request->header('Content-Type'),
-            'file_id' => $request->input('file_id'),
-            'changes_count' => is_array($request->input('changes')) ? count($request->input('changes')) : null,
-            'db' => DB::connection()->getDatabaseName(),
+        $request->validate([
+            'file_id' => 'required|exists:files,id',
+            'sheet_id' => 'required|exists:sheets,id',
         ]);
 
-        $validated = $request->validate([
-            'file_id' => 'required|integer',
-            'changes' => 'required|array',
-            'changes.*.cell' => 'nullable|string|max:16',
-            'changes.*.change_type' => 'required|string|max:64',
-            'changes.*.old_value' => 'nullable',
-            'changes.*.new_value' => 'nullable',
-        ]);
+        $histories = SheetHistory::with('user:id,name')
+            ->where('file_id', $request->file_id)
+            ->where('sheet_id', $request->sheet_id)
+            ->orderByDesc('version_number')
+            ->get(['id','file_id','sheet_id','version_number','is_current','user_id','created_at']);
 
-        $userId = Auth::id();
-
-        $records = [];
-        foreach ($validated['changes'] as $change) {
-            $records[] = [
-                'file_id' => $validated['file_id'],
-                'cell' => $change['cell'] ?? null,
-                'change_type' => $change['change_type'],
-                'old_value' => is_scalar($change['old_value'] ?? null) ? (string)($change['old_value']) : json_encode($change['old_value']),
-                'new_value' => is_scalar($change['new_value'] ?? null) ? (string)($change['new_value']) : json_encode($change['new_value']),
-                'user_id' => $userId,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
-        }
-
-        try {
-            if (!empty($records)) {
-                SheetHistory::insert($records);
-            }
-            Log::info('SheetHistory stored', [
-                'file_id' => $validated['file_id'],
-                'count' => count($records)
-            ]);
-        } catch (\Throwable $e) {
-            Log::error('SheetHistory store failed', [
-                'error' => $e->getMessage(),
-            ]);
-            return response()->json(['status' => 'error', 'message' => 'Failed to store history'], 500);
-        }
-
-        return response()->json(['status' => 'ok', 'inserted' => count($records)]);
+        return response()->json(['histories' => $histories]);
     }
 
-    public function getHistory($fileId)
+    public function show(SheetHistory $history)
     {
-        $history = SheetHistory::where('file_id', $fileId)
-            ->orderByDesc('created_at')
-            ->limit(1000)
-            ->get(['cell', 'change_type', 'old_value', 'new_value', 'created_at']);
-        Log::info('SheetHistory getHistory', [
-            'file_id' => $fileId,
-            'count' => $history->count(),
-            'db' => DB::connection()->getDatabaseName(),
+        return response()->json([
+            'history' => [
+                'id' => $history->id,
+                'file_id' => $history->file_id,
+                'sheet_id' => $history->sheet_id,
+                'version_number' => $history->version_number,
+                'is_current' => $history->is_current,
+                'data' => $history->data,
+                'user_id' => $history->user_id,
+                'created_at' => $history->created_at,
+            ]
         ]);
-        return response()->json($history);
+    }
+
+    public function restore(Request $request)
+    {
+        $data = $request->validate([
+            'history_id' => 'required|exists:sheet_histories,id',
+        ]);
+
+        $history = SheetHistory::findOrFail($data['history_id']);
+
+        DB::transaction(function () use ($history) {
+            // Next version number
+            $latest = SheetHistory::where('file_id', $history->file_id)
+                ->where('sheet_id', $history->sheet_id)
+                ->orderByDesc('version_number')
+                ->first();
+            $nextVersion = $latest ? $latest->version_number + 1 : 1;
+
+            // Mark previous current as false
+            SheetHistory::where('file_id', $history->file_id)
+                ->where('sheet_id', $history->sheet_id)
+                ->where('is_current', true)
+                ->update(['is_current' => false]);
+
+            // Insert new current as a copy of selected version
+            SheetHistory::create([
+                'file_id' => $history->file_id,
+                'sheet_id' => $history->sheet_id,
+                'version_number' => $nextVersion,
+                'is_current' => true,
+                'data' => $history->data,
+                'user_id' => Auth::check() ? Auth::id() : null,
+            ]);
+        });
+
+        return response()->json(['message' => 'Version restored as new current.']);
     }
 }
 
