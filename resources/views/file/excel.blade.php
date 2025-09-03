@@ -26,9 +26,7 @@
                 <button id="exportBtn" class="btn btn-sm btn-primary">
                     <i class="fas fa-file-export fa-sm"></i> Export
                 </button>
-                <button id="historyBtn" class="btn btn-sm btn-secondary">
-                    <i class="fas fa-history"></i> History
-                </button>
+                
             </div>
         </div>
 
@@ -453,129 +451,7 @@ $(document).ready(function() {
         XLSX.writeFile(wb, fileName + '.xlsx');
     });
 
-    // ===== Version History Modal and Logic =====
-    function getActiveSheetMeta() {
-        var allSheets = luckysheet.getAllSheets();
-        var idx = luckysheet.getActiveSheetIndex();
-        var sheet = allSheets[idx];
-        return { id: sheet.id || null, name: sheet.name || '' };
-    }
-
-    function renderHistoryRows(histories) {
-        var rows = (histories || []).map(function(h) {
-            var badge = h.is_current ? '<span class="badge bg-success">Current</span>' : '';
-            var user = (h.user && h.user.name) ? h.user.name : (h.user_id || 'Unknown');
-            return '<tr>'+
-                '<td>v'+ h.version_number +'</td>'+
-                '<td>'+ user +'</td>'+
-                '<td>'+ (new Date(h.created_at)).toLocaleString() +'</td>'+
-                '<td>'+ badge +'</td>'+
-                '<td class="text-end">'+
-                    '<button class="btn btn-sm btn-outline-primary preview-history" data-id="'+h.id+'">Preview</button> '+
-                    (h.is_current ? '' : '<button class="btn btn-sm btn-outline-danger restore-history" data-id="'+h.id+'">Restore</button>')+
-                '</td>'+
-            '</tr>';
-        }).join('');
-        $('#historyTableBody').html(rows || '<tr><td colspan="5" class="text-center">No history yet</td></tr>');
-    }
-
-    function loadHistoryList() {
-        var sheetMeta = getActiveSheetMeta();
-        if (!fileId) {
-            $('#historyTableBody').html('<tr><td colspan="5" class="text-center">No file. Save first.</td></tr>');
-            return;
-        }
-        // If sheet id is missing, attempt to resolve by name from backend
-        if (!sheetMeta.id) {
-            $.getJSON('/files/' + fileId + '/sheets')
-                .done(function(res) {
-                    try {
-                        var list = res || [];
-                        var found = list.find(function(s){ return (s.name || '').toLowerCase() === (sheetMeta.name || '').toLowerCase(); });
-                        if (found && found.id) {
-                            // set id on the active sheet for future calls
-                            var allSheets = luckysheet.getAllSheets();
-                            var idx = luckysheet.getActiveSheetIndex();
-                            allSheets[idx].id = found.id;
-                            // proceed to load history
-                            $.getJSON('/history', { file_id: fileId, sheet_id: found.id })
-                                .done(function(res2) { renderHistoryRows(res2.histories || []); })
-                                .fail(function(xhr2) {
-                                    console.error('History load failed', xhr2);
-                                    $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Failed to load history</td></tr>');
-                                });
-                        } else {
-                            $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Sheet not saved yet. Click Save, then retry.</td></tr>');
-                        }
-                    } catch(e) {
-                        $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Error resolving sheet</td></tr>');
-                    }
-                })
-                .fail(function(xhr){
-                    console.error('Resolve sheet id failed', xhr);
-                    $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Failed to resolve sheet</td></tr>');
-                });
-            return;
-        }
-        $.getJSON('/history', { file_id: fileId, sheet_id: sheetMeta.id })
-            .done(function(res) { renderHistoryRows(res.histories || []); })
-            .fail(function(xhr) {
-                console.error('History load failed', xhr);
-                $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Failed to load history</td></tr>');
-            });
-    }
-
-    $('#historyBtn').on('click', function() {
-        var modalEl = document.getElementById('historyModal');
-        var modal = new bootstrap.Modal(modalEl);
-        // Show placeholder while loading
-        $('#historyTableBody').html('<tr><td colspan="5" class="text-center py-3">Loading...</td></tr>');
-        try {
-            loadHistoryList();
-        } catch (e) {
-            console.error('History click error', e);
-            $('#historyTableBody').html('<tr><td colspan="5" class="text-center">Failed to load history</td></tr>');
-        }
-        modal.show();
-    });
-
-    $(document).on('click', '.preview-history', function() {
-        var id = $(this).data('id');
-        $.getJSON('/history/' + id)
-            .done(function(res) {
-                var payload = res.history.data || {};
-                var sheets = [{
-                    name: payload.name || 'Sheet',
-                    // Build from celldata if present, else use data
-                    data: Array.isArray(payload.data) ? payload.data : [],
-                    celldata: Array.isArray(payload.celldata) ? payload.celldata : [],
-                    config: payload.config || {},
-                    order: payload.order || 0,
-                    status: 1
-                }];
-                luckysheet.destroy();
-                luckysheet.create({ container: 'luckysheet', data: sheets, showinfobar: false, showtoolbar: true, showstatisticBar: false, showSheetBar: false, allowEdit: false });
-            })
-            .fail(function() { alert('Failed to load version'); });
-    });
-
-    $(document).on('click', '.restore-history', function() {
-        var id = $(this).data('id');
-        if (!confirm('Restore this version? This will create a new version as current.')) return;
-        $.ajax({
-            url: '/history/restore',
-            type: 'POST',
-            data: JSON.stringify({ history_id: id }),
-            contentType: 'application/json',
-            headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
-        }).done(function() {
-            loadHistoryList();
-            alert('Version restored. Reloading current sheet view...');
-            initializeLuckysheet(luckysheet.getAllSheets());
-        }).fail(function(xhr){
-            alert('Failed to restore: ' + (xhr.responseJSON?.message || xhr.statusText));
-        });
-    });
+    // History UI removed
 
 
 
@@ -648,34 +524,5 @@ $(document).ready(function() {
 
 </style>
 
-<!-- History Modal -->
-<div class="modal fade" id="historyModal" tabindex="-1" aria-labelledby="historyModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="historyModalLabel">Version History</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-sm mb-0">
-                        <thead>
-                            <tr>
-                                <th>Version</th>
-                                <th>User</th>
-                                <th>Created</th>
-                                <th>Status</th>
-                                <th class="text-end">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="historyTableBody"></tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-            </div>
-        </div>
-    </div>
-    </div>
+{{-- History modal removed --}}
 @endsection

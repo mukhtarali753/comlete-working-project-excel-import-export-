@@ -22,7 +22,6 @@ use Maatwebsite\Excel\Facades\Excel;
 
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\SheetHistoryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -195,12 +194,6 @@ Route::controller(SheetController::class)->group(function () {
     Route::get('/test-import', 'testImport')->name('sheets.test'); // Test route for debugging
 });
 
-// Sheet history routes
-Route::prefix('history')->name('history.')->group(function () {
-    Route::get('/', [SheetHistoryController::class, 'index'])->name('index'); // file_id, sheet_id
-    Route::get('/{history}', [SheetHistoryController::class, 'show'])->name('show');
-    Route::post('/restore', [SheetHistoryController::class, 'restore'])->name('restore');
-});
 
 // Excel Import Routes
 Route::prefix('excel-import')->name('excel.import.')->middleware(['auth'])->group(function () {
