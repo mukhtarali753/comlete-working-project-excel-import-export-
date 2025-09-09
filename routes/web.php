@@ -192,6 +192,12 @@ Route::controller(SheetController::class)->group(function () {
     Route::delete('/sheets/{id}', 'deleteSheet')->name('sheets.delete');
     Route::get('/export/{file}/{type}', 'export')->name('sheets.export');
     Route::get('/test-import', 'testImport')->name('sheets.test'); // Test route for debugging
+    
+    // Version history routes
+    Route::get('/row/{rowId}/versions', 'getRowVersionHistory')->name('sheets.row.versions');
+    Route::get('/sheet/{sheetId}/versions', 'getSheetVersionHistory')->name('sheets.sheet.versions');
+    Route::post('/row/{rowId}/restore/{versionNumber}', 'restoreRowVersion')->name('sheets.row.restore');
+    Route::post('/sheet/{sheetId}/restore/{versionNumber}', 'restoreSheetVersion')->name('sheets.sheet.restore');
 });
 
 

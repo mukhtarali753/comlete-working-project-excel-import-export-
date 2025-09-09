@@ -7,7 +7,7 @@ use Illuminate\Validation\Rule;
 
 class Sheet extends Model
 {
-    protected $fillable = ['file_id', 'name', 'order', 'data', 'config', 'celldata'];
+    protected $fillable = ['file_id', 'name', 'order', 'data', 'config', 'celldata', 'version', 'is_current'];
 
     protected $casts = [
         'data' => 'json',
@@ -23,6 +23,7 @@ class Sheet extends Model
     public function rows()
     {
         return $this->hasMany(SheetRow::class);
+        // return $this->hasMany(SheetRow::class)->where('version', 0);
     }
 
     /**

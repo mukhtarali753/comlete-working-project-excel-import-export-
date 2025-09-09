@@ -13,8 +13,7 @@ class BusinessController extends Controller
 
         $files = File::all();
        
-        return view('
-        file.preview', compact('files'));
+        return view('file.preview', compact('files'));
     }
 
     public function editSheet(File $business)
@@ -23,21 +22,36 @@ class BusinessController extends Controller
         $sheets = $business->sheets()->orderBy('order')->get()->map(function ($sheet) {
             // Prefer persisted Luckysheet structure if available (data or celldata or config)
             if (!empty($sheet->data) || !empty($sheet->celldata) || !empty($sheet->config)) {
-                $decodedData = is_string($sheet->data) ? json_decode($sheet->data, true) : ($sheet->data ?? []);
-                $decodedConfig = is_string($sheet->config) ? json_decode($sheet->config, true) : ($sheet->config ?? ['rowlen' => [], 'columnlen' => []]);
-                $decodedCelldata = is_string($sheet->celldata) ? json_decode($sheet->celldata, true) : ($sheet->celldata ?? []);
+                $decodedData = is_string($sheet->data) ? json_decode($sheet->data, true) : (is_array($sheet->data) ? $sheet->data : []);
+                $decodedConfig = is_string($sheet->config) ? json_decode($sheet->config, true) : (is_array($sheet->config) ? $sheet->config : ['rowlen' => [], 'columnlen' => []]);
+                $decodedCelldata = is_string($sheet->celldata) ? json_decode($sheet->celldata, true) : (is_array($sheet->celldata) ? $sheet->celldata : []);
 
                 // Normalize to Luckysheet cell objects { v: value }
                 if (is_array($decodedData)) {
                     $decodedData = array_map(function ($row) {
                         if (!is_array($row)) return [];
                         return array_map(function ($cell) {
-                            return (is_array($cell) && array_key_exists('v', $cell)) ? $cell : ['v' => (string)$cell];
+                            if (is_array($cell) && array_key_exists('v', $cell)) {
+                                return $cell;
+                            } elseif (is_array($cell)) {
+                                return ['v' => ''];
+                            } else {
+                                return ['v' => (string)$cell];
+                            }
                         }, $row);
                     }, $decodedData);
+                } else {
+                    $decodedData = [];
                 }
 
                 // Ensure config sizes
+                if (!is_array($decodedConfig)) {
+                    $decodedConfig = ['rowlen' => [], 'columnlen' => []];
+                }
+                if (!is_array($decodedCelldata)) {
+                    $decodedCelldata = [];
+                }
+                
                 $maxCols = 0;
                 foreach ($decodedData as $row) { $maxCols = max($maxCols, is_array($row) ? count($row) : 0); }
                 if (empty($decodedConfig['columnlen'])) { $decodedConfig['columnlen'] = array_fill(0, $maxCols, 200); }
@@ -75,6 +89,12 @@ class BusinessController extends Controller
                         }
                         $cells[] = $cell;
                     }
+                    // Attach the row id on the first cell to keep linkage with DB row
+                    if (!empty($cells)) {
+                        $cells[0] = array_merge($cells[0], ['rowId' => $row->id]);
+                    } else {
+                        $cells[] = ['v' => '', 'rowId' => $row->id];
+                    }
                     return $cells;
                 }
 
@@ -87,6 +107,12 @@ class BusinessController extends Controller
                         foreach ($formats[$i] as $k => $v) { $cell[$k] = $v; }
                     }
                     $cells[] = $cell;
+                }
+                // Attach the row id on the first cell to keep linkage with DB row
+                if (!empty($cells)) {
+                    $cells[0] = array_merge($cells[0], ['rowId' => $row->id]);
+                } else {
+                    $cells[] = ['v' => '', 'rowId' => $row->id];
                 }
                 return $cells;
             })->toArray();

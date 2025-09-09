@@ -23,11 +23,30 @@
                 <button id="saveSheetBtn" class="btn btn-sm btn-success">
                     <i class="fas fa-save"></i> Save Data
                 </button>
+                <button id="versionHistoryBtn" class="btn btn-sm btn-info">
+                    <i class="fas fa-history"></i> History
+                </button>
+                <div class="form-check form-check-inline ml-2">
+                    <input class="form-check-input" type="checkbox" id="enableVersionHistory" checked>
+                    <label class="form-check-label" for="enableVersionHistory">
+                        <small>Version History</small>
+                    </label>
+                    <small class="text-muted ml-1" id="versionHistoryInfo">(Auto-disabled for large sheets)</small>
+                </div>
                 <button id="exportBtn" class="btn btn-sm btn-primary">
                     <i class="fas fa-file-export fa-sm"></i> Export
                 </button>
                 
             </div>
+        </div>
+
+        <!-- Progress Bar for Save Operations -->
+        <div id="saveProgress" class="progress-bar-container" style="display: none;">
+            <div class="progress">
+                <div id="saveProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                     role="progressbar" style="width: 0%"></div>
+            </div>
+            <small id="saveProgressText" class="text-muted">Preparing to save...</small>
         </div>
 
         <div class="card-body p-0 position-relative">
@@ -47,6 +66,114 @@
 {{-- Luckysheet and dependencies --}}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 
+<script>
+// Global functions accessible from HTML onclick attributes
+function closeVersionHistoryModal() {
+    try {
+        if (window.currentModal) {
+            window.currentModal.hide();
+        } else {
+            // Fallback: try to close using jQuery
+            $('#versionHistoryModal').modal('hide');
+        }
+    } catch (e) {
+        console.error('Error closing modal:', e);
+        // Final fallback: hide the modal directly
+        $('#versionHistoryModal').hide();
+        $('body').removeClass('modal-open');
+        $('.modal-backdrop').remove();
+    }
+}
+
+// Helper function to format date and time
+function formatDateTime(dateString) {
+    if (!dateString) return 'N/A';
+    try {
+        var date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+        return date.toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+    } catch (e) {
+        return dateString;
+    }
+}
+
+// Function to restore a specific version
+function restoreVersion(rowId, versionNumber) {
+    if (!confirm('Are you sure you want to restore version ' + versionNumber + ' for row ' + rowId + '? This will overwrite the current data.')) {
+        return;
+    }
+    
+    $.ajax({
+        url: '/row/' + rowId + '/restore/' + versionNumber,
+        type: 'POST',
+        headers: {
+            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+        },
+        success: function(response) {
+            alert('Version restored successfully! The sheet will refresh to show the restored data.');
+            // Refresh the version history
+            showVersionHistory();
+        },
+        error: function(xhr) {
+            var errorMsg = 'Failed to restore version';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMsg += ': ' + xhr.responseJSON.message;
+            }
+            alert(errorMsg);
+        }
+    });
+}
+
+// Restore entire sheet to a selected version
+function revertSheetVersion(sheetId, versionNumber) {
+    if (!sheetId || versionNumber === null || versionNumber === undefined) {
+        alert('Invalid version selection.');
+        return;
+    }
+
+    if (!confirm('Revert this sheet to version ' + versionNumber + '? This will overwrite current rows.')) {
+        return;
+    }
+
+    $.ajax({
+        url: '/sheet/' + sheetId + '/restore/' + versionNumber,
+        type: 'POST',
+        headers: {
+            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+        },
+        success: function(response) {
+            alert('Sheet reverted to version ' + versionNumber + ' successfully.');
+            
+            // Update the global active sheet ID to the new sheet ID
+            if (response.sheet_id) {
+                window.__activeSheetId = response.sheet_id;
+            }
+            
+            // Refresh version history and sheet content
+            showVersionHistory();
+            // Also reload all sheets for the current file to reflect restored content
+            if (typeof fileId !== 'undefined' && fileId) {
+                $.getJSON('/sheets/' + fileId, function(payload) {
+                    if (payload && payload.sheets) {
+                        initializeLuckysheet(payload.sheets);
+                    }
+                });
+            }
+        },
+        error: function(xhr) {
+            var errorMsg = 'Failed to revert sheet';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMsg += ': ' + xhr.responseJSON.message;
+            }
+            alert(errorMsg);
+        }
+    });
+}
+</script>
+
 
 <link rel="stylesheet" href="/luckysheet/plugins/css/pluginsCss.css" />
 <link rel="stylesheet" href="/luckysheet/assets/iconfont/iconfont.css" />
@@ -62,6 +189,11 @@ $(document).ready(function() {
     var initialSheets = @json($sheets ?? []);
     var fileId = @json($file->id ?? null);
     var isImporting = @json(!isset($file) ? true : false);
+    
+    // Global function to check if Luckysheet is ready
+    function isLuckysheetReady() {
+        return typeof luckysheet !== 'undefined' && luckysheet && typeof luckysheet.getAllSheets === 'function';
+    }
 
     // Update header text based on import status
     function updateHeaderText() {
@@ -134,6 +266,14 @@ $(document).ready(function() {
             
             if (sheet.id) {
                 sheetData.id = sheet.id;
+            }
+            
+            // Store row IDs if they exist (for existing sheets loaded from database)
+            if (sheet.rowIds && Array.isArray(sheet.rowIds)) {
+                sheetData.__rowIds = sheet.rowIds;
+                console.log('Loaded sheet "' + sheet.name + '" with rowIds:', sheet.rowIds);
+            } else {
+                console.log('Loaded sheet "' + sheet.name + '" without rowIds');
             }
             
             formattedSheets.push(sheetData);
@@ -211,11 +351,29 @@ $(document).ready(function() {
     }
 
     // Initialize Luckysheet
+    console.log('Initializing Luckysheet...');
     initializeLuckysheet(initialSheets);
     updateHeaderText();
+    
+    // Initialize Luckysheet event handlers after a delay
+    setTimeout(function() {
+        console.log('Attempting to initialize Luckysheet events...');
+        initializeLuckysheetEvents();
+        initializeSheetSizeCheck();
+    }, 1000);
+    
+    // Check initial sheet size
+    setTimeout(function() {
+        console.log('Checking initial sheet size...');
+        checkSheetSize();
+    }, 1500);
 
     // Add new sheet button handler
     $('#addNewSheetBtn').on('click', function() {
+        if (!isLuckysheetReady()) {
+            alert('Please wait for the sheet to load completely before adding a new sheet.');
+            return;
+        }
         window.sheetCount = window.sheetCount || initialSheets.length;
         window.sheetCount++;
 
@@ -284,6 +442,7 @@ $(document).ready(function() {
         
         $.each(allSheets, function(index, sheet) {
             var data2D = sheet.data;
+            
             if (!Array.isArray(data2D) || data2D.length === 0) {
                 // Fallback: build from celldata if present
                 if (Array.isArray(sheet.celldata) && sheet.celldata.length > 0) {
@@ -309,6 +468,54 @@ $(document).ready(function() {
                     data2D = [];
                 }
             }
+            
+            // Build row updates array - include ALL rows with data or modifications
+            var rowUpdates = [];
+            
+            if (Array.isArray(data2D)) {
+                data2D.forEach(function(row, rowIndex) {
+                    var rowId = null;
+                    var hasData = false;
+                    var isModified = false;
+                    
+                    // Check if this row was marked as modified
+                    if (sheet.__modifiedRows && sheet.__modifiedRows[rowIndex]) {
+                        isModified = true;
+                    }
+                    
+                    // Check if row has any data
+                    if (Array.isArray(row)) {
+                        row.forEach(function(cell, colIndex) {
+                            // Check if cell has actual content
+                            if (cell && typeof cell === 'object' && cell.v && cell.v !== '') {
+                                hasData = true;
+                            }
+                        });
+                    }
+                    
+                    // For existing sheets, try to get rowId from the original data
+                    // This should be stored when the sheet is loaded from the database
+                    if (sheet.__rowIds && sheet.__rowIds[rowIndex]) {
+                        rowId = sheet.__rowIds[rowIndex];
+                    }
+                    
+                    // Debug: Log row ID tracking
+                    if (rowIndex < 5) { // Only log first 5 rows to avoid spam
+                        console.log('Row ' + rowIndex + ' - rowId:', rowId, 'hasData:', hasData, 'isModified:', isModified, 'sheet.__rowIds:', sheet.__rowIds);
+                    }
+                    
+                    // Include ALL rows that have data OR are modified OR have a rowId
+                    // This ensures we capture all changes properly
+                    if (hasData || isModified || rowId !== null) {
+                        rowUpdates.push({
+                            rowIndex: rowIndex,
+                            rowId: rowId,
+                            data: row,
+                            modified: isModified
+                        });
+                    }
+                });
+            }
 
             sheets.push({
                 name: sheet.name,
@@ -316,55 +523,199 @@ $(document).ready(function() {
                 config: JSON.stringify(sheet.config || {}),
                 celldata: JSON.stringify(sheet.celldata || []),
                 order: sheet.order,
-                id: sheet.id || null
+                id: sheet.id || null,
+                rowUpdates: rowUpdates
             });
         });
+        
+        var versionHistoryEnabled = $('#enableVersionHistory').is(':checked');
+        console.log('Version history enabled:', versionHistoryEnabled);
+        console.log('Checkbox state:', $('#enableVersionHistory').prop('checked'));
+        console.log('Payload sheets:', sheets);
         
         return {
             name: fileName,
             sheets: sheets,
-            file_id: fileId || null
+            file_id: fileId || null,
+            enable_version_history: versionHistoryEnabled
         };
     }
 
     function saveNow(isAuto) {
         isAuto = isAuto || false;
+        
+        // Show progress indicator for manual saves
+        if (!isAuto) {
+            $('#saveSheetBtn').prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
+            $('#saveProgress').show();
+            updateSaveProgress(0, 'Preparing data...');
+        }
+        
         var payload = buildSavePayload();
+        
+        // Debug: Log the payload structure
+        console.log('Save payload:', payload);
+        console.log('Row updates for first sheet:', payload.sheets[0]?.rowUpdates);
+        
+        // Check if payload is too large and needs chunking
+        var payloadSize = JSON.stringify(payload).length;
+        var maxPayloadSize = 10000000; // Increased to 10MB limit
+        
+        if (payloadSize > maxPayloadSize) {
+            // Save in chunks
+            saveInChunks(payload, isAuto);
+            return;
+        }
+        
+        // Regular save with increased timeout
+        performSave(payload, isAuto);
+    }
+    
+    function saveInChunks(payload, isAuto) {
+        var sheets = payload.sheets;
+        var totalSheets = sheets.length;
+        var currentSheet = 0;
+        var savedSheets = [];
+        
+        function saveNextChunk() {
+            if (currentSheet >= totalSheets) {
+                // All chunks saved, finalize
+                finalizeChunkedSave(savedSheets, isAuto);
+                return;
+            }
+            
+            var progress = Math.round((currentSheet / totalSheets) * 100);
+            updateSaveProgress(progress, `Saving sheet ${currentSheet + 1} of ${totalSheets}...`);
+            
+            var chunkPayload = {
+                name: payload.name,
+                sheets: [sheets[currentSheet]],
+                file_id: payload.file_id,
+                isChunked: true,
+                chunkIndex: currentSheet,
+                totalChunks: totalSheets
+            };
+            
+            performSave(chunkPayload, true, function(response) {
+                if (response.sheets && response.sheets[0]) {
+                    savedSheets.push(response.sheets[0]);
+                }
+                currentSheet++;
+                saveNextChunk();
+            });
+        }
+        
+        saveNextChunk();
+    }
+    
+    function performSave(payload, isAuto, callback) {
         $.ajax({
             url: '{{ route("sheets.save") }}',
             type: 'POST',
             data: JSON.stringify(payload),
             contentType: 'application/json',
             headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+            timeout: 120000, // Increased to 2 minutes timeout
             success: function(response) {
-                if (!isAuto) alert('Data saved successfully!');
-                isImporting = false;
-                updateHeaderText();
-                if (!fileId && response.file_id) {
-                    fileId = response.file_id;
-                    window.history.replaceState({}, '', '/excel-preview/' + response.file_id);
-                }
-                if (response.sheets) {
-                    var updatedSheets = [];
-                    var allSheets = luckysheet.getAllSheets();
-                    $.each(allSheets, function(index, sheet) {
-                        if (sheet.__isNew && response.sheets[index]) {
-                            sheet.id = response.sheets[index].id;
-                            delete sheet.__isNew;
-                        }
-                        delete sheet.__modified;
-                        updatedSheets.push(sheet);
-                    });
-                    initializeLuckysheet(updatedSheets);
+                if (callback) {
+                    callback(response);
+                } else {
+                    handleSaveSuccess(response, isAuto);
                 }
             },
             error: function(xhr) {
-                var msg = 'Save failed';
-                if (xhr.responseJSON && xhr.responseJSON.message) msg += ': ' + xhr.responseJSON.message;
-                else if (xhr.statusText) msg += ': ' + xhr.statusText;
-                alert(msg);
+                handleSaveError(xhr, isAuto);
             }
         });
+    }
+    
+    function handleSaveSuccess(response, isAuto) {
+        if (!isAuto) {
+            $('#saveSheetBtn').prop('disabled', false).html('<i class="fas fa-save"></i> Save Data');
+            $('#saveProgress').hide();
+            alert('Data saved successfully!');
+        }
+        
+        isImporting = false;
+        updateHeaderText();
+        
+        if (!fileId && response.file_id) {
+            fileId = response.file_id;
+            window.history.replaceState({}, '', '/excel-preview/' + response.file_id);
+        }
+        
+        if (response.sheets) {
+            var updatedSheets = [];
+            var allSheets = luckysheet.getAllSheets();
+            $.each(allSheets, function(index, sheet) {
+                if (sheet.__isNew && response.sheets[index]) {
+                    sheet.id = response.sheets[index].id;
+                    delete sheet.__isNew;
+                }
+                delete sheet.__modified;
+                delete sheet.__modifiedRows;
+                
+                // Preserve row IDs if they exist
+                if (sheet.__rowIds) {
+                    // Keep existing row IDs for tracking
+                }
+                
+                updatedSheets.push(sheet);
+            });
+            initializeLuckysheet(updatedSheets);
+        }
+    }
+    
+    function handleSaveError(xhr, isAuto) {
+        if (!isAuto) {
+            $('#saveSheetBtn').prop('disabled', false).html('<i class="fas fa-save"></i> Save Data');
+            $('#saveProgress').hide();
+        }
+        
+        var msg = 'Save failed';
+        if (xhr.responseJSON && xhr.responseJSON.message) {
+            msg += ': ' + xhr.responseJSON.message;
+        } else if (xhr.statusText) {
+            msg += ': ' + xhr.statusText;
+        } else if (xhr.status === 0) {
+            msg += ': Request timeout or connection lost';
+        }
+        alert(msg);
+    }
+    
+    function finalizeChunkedSave(savedSheets, isAuto) {
+        if (!isAuto) {
+            $('#saveSheetBtn').prop('disabled', false).html('<i class="fas fa-save"></i> Save Data');
+            $('#saveProgress').hide();
+            alert('Large file saved successfully in chunks!');
+        }
+        
+        // Update sheet IDs and clear modification flags
+        var allSheets = luckysheet.getAllSheets();
+        $.each(allSheets, function(index, sheet) {
+            if (sheet.__isNew) {
+                var savedSheet = savedSheets.find(s => s.name === sheet.name);
+                if (savedSheet) {
+                    sheet.id = savedSheet.id;
+                    delete sheet.__isNew;
+                }
+            }
+            delete sheet.__modified;
+            delete sheet.__modifiedRows;
+            
+            // Preserve row IDs if they exist
+            if (sheet.__rowIds) {
+                // Keep existing row IDs for tracking
+            }
+        });
+        
+        isImporting = false;
+        updateHeaderText();
+    }
+    
+    function updateSaveProgress(percentage, text) {
+        $('#saveProgressBar').css('width', percentage + '%');
+        $('#saveProgressText').text(text);
     }
 
     var autoSaveTimer = null;
@@ -374,29 +725,58 @@ $(document).ready(function() {
     }
 
     // Save data button handler
-    $('#saveSheetBtn').on('click', function() { saveNow(false); });
+    $('#saveSheetBtn').on('click', function() { 
+        if (!isLuckysheetReady()) {
+            alert('Please wait for the sheet to load completely before saving.');
+            return;
+        }
+        saveNow(false); 
+    });
 
-    // Mark modified and autosave on edits
-    if (luckysheet && typeof luckysheet.on === 'function') {
-        var markModified = function() {
-            var allSheets = luckysheet.getAllSheets();
-            var activeSheetIndex = luckysheet.getActiveSheetIndex();
-            allSheets[activeSheetIndex].__modified = true;
-            scheduleAutoSave();
-        };
+    // Function to initialize Luckysheet event handlers
+    function initializeLuckysheetEvents() {
+        if (isLuckysheetReady() && typeof luckysheet.on === 'function') {
+            var markModified = function(rowIndex) {
+                var allSheets = luckysheet.getAllSheets();
+                var activeSheetIndex = luckysheet.getActiveSheetIndex();
+                var activeSheet = allSheets[activeSheetIndex];
+                
+                // Mark the sheet as modified
+                activeSheet.__modified = true;
+                
+                // Mark the specific row as modified
+                if (!activeSheet.__modifiedRows) {
+                    activeSheet.__modifiedRows = {};
+                }
+                if (rowIndex !== undefined) {
+                    activeSheet.__modifiedRows[rowIndex] = true;
+                }
+                
+                scheduleAutoSave();
+            };
 
-        luckysheet.on('cellEdited', function(payload) {
-            try {
-                markModified();
-            } catch(e) {}
-        });
-        luckysheet.on('updated', function(operate) {
-            try {
-                markModified();
-            } catch (e) {}
-        });
-        luckysheet.on('cellMousedown', function() {});
-        // Hook common toolbar actions that affect formatting via keydown already
+            luckysheet.on('cellEdited', function(payload) {
+                try {
+                    if (payload && payload.r !== undefined) {
+                        markModified(payload.r);
+                    } else {
+                        markModified();
+                    }
+                } catch(e) {}
+            });
+            luckysheet.on('updated', function(operate) {
+                try {
+                    markModified();
+                } catch (e) {}
+            });
+            luckysheet.on('cellMousedown', function() {});
+            
+            // Hook common toolbar actions that affect formatting via keydown already
+            console.log('Luckysheet events initialized successfully');
+        } else {
+            console.log('Luckysheet not ready yet, retrying in 500ms...');
+            setTimeout(initializeLuckysheetEvents, 500);
+        }
     }
 
     // Keyboard shortcuts: Ctrl/Cmd+S to save, and autosave on common edit keys
@@ -424,6 +804,11 @@ $(document).ready(function() {
 
     // Export button handler
     $('#exportBtn').on('click', function() {
+        if (!isLuckysheetReady()) {
+            alert('Please wait for the sheet to load completely before exporting.');
+            return;
+        }
+        
         var allSheets = luckysheet.getAllSheets();
         var wb = XLSX.utils.book_new();
         
@@ -450,6 +835,232 @@ $(document).ready(function() {
         var fileName = $('#fileNameInput').val().trim() || 'export';
         XLSX.writeFile(wb, fileName + '.xlsx');
     });
+
+    // Version History button handler
+    $('#versionHistoryBtn').on('click', function() {
+        if (!fileId) {
+            alert('Please save your file first to view version history.');
+            return;
+        }
+        
+        if (!isLuckysheetReady()) {
+            alert('Please wait for the sheet to load completely before viewing version history.');
+            return;
+        }
+        
+        showVersionHistory();
+    });
+
+    // Auto-disable version history for large sheets
+    function checkSheetSize() {
+        if (!isLuckysheetReady()) {
+            console.log('Luckysheet not ready for sheet size check');
+            return;
+        }
+        
+        var allSheets = luckysheet.getAllSheets();
+        var totalRows = 0;
+        
+        allSheets.forEach(function(sheet) {
+            if (sheet.data && Array.isArray(sheet.data)) {
+                totalRows += sheet.data.length;
+            }
+        });
+        
+        if (totalRows > 1000) {
+            $('#enableVersionHistory').prop('checked', false).prop('disabled', true);
+            $('#versionHistoryInfo').text('(Disabled - Sheet too large: ' + totalRows + ' rows)').addClass('text-warning');
+        } else {
+            $('#enableVersionHistory').prop('disabled', false);
+            $('#versionHistoryInfo').text('(Auto-disabled for large sheets)').removeClass('text-warning');
+        }
+    }
+
+    // Check sheet size when data changes
+    function initializeSheetSizeCheck() {
+        if (isLuckysheetReady() && typeof luckysheet.on === 'function') {
+            luckysheet.on('updated', function() {
+                checkSheetSize();
+            });
+            console.log('Sheet size check initialized successfully');
+        } else {
+            console.log('Luckysheet not ready for sheet size check, retrying in 500ms...');
+            setTimeout(initializeSheetSizeCheck, 500);
+        }
+    }
+
+    // Function to show version history
+    function showVersionHistory() {
+        $('#versionHistoryContent').html('<p class="text-muted">Loading version history...</p>');
+        
+        // Show modal using Bootstrap 5 syntax
+        var modalElement = document.getElementById('versionHistoryModal');
+        if (!modalElement) {
+            alert('Modal element not found');
+            return;
+        }
+        
+        try {
+            var modal = new bootstrap.Modal(modalElement);
+            modal.show();
+            
+            // Store modal reference for later use
+            window.currentModal = modal;
+        } catch (e) {
+            console.error('Error showing modal:', e);
+            // Fallback to jQuery modal
+            $('#versionHistoryModal').modal('show');
+        }
+        
+        // Get the active sheet reliably
+        var activeSheetIndexValue = null; // Luckysheet's internal index value
+        try {
+            if (typeof luckysheet.getActiveSheetIndex === 'function') {
+                activeSheetIndexValue = luckysheet.getActiveSheetIndex();
+            } else if (typeof luckysheet.getActiveSheet === 'function') {
+                var tmpActive = luckysheet.getActiveSheet();
+                if (tmpActive && tmpActive.index !== undefined) {
+                    activeSheetIndexValue = tmpActive.index;
+                }
+            }
+        } catch (e) {
+            console.log('Error getting active sheet index:', e);
+        }
+
+        var allSheets = luckysheet.getAllSheets() || [];
+        var activeSheet = null;
+        // Prefer the tab with status === 1 (Luckysheet marks active tab this way)
+        activeSheet = allSheets.find(function(s){ return s && s.status === 1; }) || null;
+        if (!activeSheet && activeSheetIndexValue !== null) {
+            // Fallback to matching internal index value (coerce types for safety)
+            activeSheet = allSheets.find(function(s){
+                if (!s || typeof s.index === 'undefined') return false;
+                var si = Number(s.index);
+                var ai = Number(activeSheetIndexValue);
+                return !isNaN(si) && !isNaN(ai) && si === ai;
+            }) || null;
+        }
+        if (!activeSheet) {
+            // Fallback: use currently focused position or first sheet
+            activeSheet = allSheets[0] || null;
+        }
+        console.log('Resolved active sheet:', activeSheet);
+        
+        if (!activeSheet || !activeSheet.id) {
+            console.log('No active sheet or sheet ID found');
+            $('#versionHistoryContent').html('<p class="text-danger">No sheet selected or sheet not saved yet. Please save your sheet first.</p>');
+            return;
+        }
+        
+        // Store active sheet id/name globally for revert actions and labeling
+        window.__activeSheetId = activeSheet.id;
+        window.__activeSheetName = activeSheet.name;
+
+        // Fetch version history for the active sheet
+        $.ajax({
+            url: '/sheet/' + activeSheet.id + '/versions',
+            type: 'GET',
+            headers: {
+                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+            },
+            success: function(response) {
+                console.log('Version history response:', response);
+                if (response.version_history && response.version_history.length > 0) {
+                    console.log('First row history:', response.version_history[0]);
+                    if (response.version_history[0].versions && response.version_history[0].versions.length > 0) {
+                        console.log('First version data:', response.version_history[0].versions[0]);
+                        console.log('Data type:', typeof response.version_history[0].versions[0].sheet_data);
+                        console.log('Data content:', response.version_history[0].versions[0].sheet_data);
+                    }
+                }
+                displayVersionHistory(response);
+            },
+            error: function(xhr) {
+                $('#versionHistoryContent').html('<p class="text-danger">Failed to load version history: ' + (xhr.responseJSON?.message || 'Unknown error') + '</p>');
+            }
+        });
+    }
+
+    // Add keyboard event handler for modal
+    $(document).on('keydown', function(e) {
+        if (e.key === 'Escape' && $('#versionHistoryModal').hasClass('show')) {
+            closeVersionHistoryModal();
+        }
+    });
+
+    // Add click outside modal to close functionality
+    $('#versionHistoryModal').on('click', function(e) {
+        if (e.target === this) {
+            closeVersionHistoryModal();
+        }
+    });
+
+    // Function to display version history
+    function displayVersionHistory(data) {
+        console.log('Displaying version history:', data);
+        var html = '<div class="version-history">';
+        var sheetLabel = (typeof window.__activeSheetName !== 'undefined' && window.__activeSheetName) ? window.__activeSheetName : (data.sheet_name || 'Unknown');
+        html += '<h6>Sheet: ' + sheetLabel + '</h6>';
+        
+        // Sheet-level history table (version, is_current, timestamp)
+        if (data.sheet_history && data.sheet_history.length) {
+            html += '<div class="table-responsive mb-3">';
+            html += '<table class="table table-sm table-bordered">';
+            html += '<thead><tr><th>Version</th><th>Status</th><th>Timestamp</th><th style="width:120px;">Action</th></tr></thead><tbody>';
+            var sortedHistory = (data.sheet_history || []).slice().sort(function(a, b) {
+                var va = (a.version ?? 0);
+                var vb = (b.version ?? 0);
+                return vb - va; // version desc (latest first)
+            });
+            
+            // Find the latest version (first in sorted array)
+            var latestVersion = sortedHistory.length > 0 ? sortedHistory[0].version : null;
+            
+            sortedHistory.forEach(function(item, idx){
+                var isCurrentNum = ((String(item.is_current) === '1') || (item.is_current === 1) || (item.is_current === true)) ? 1 : 0;
+                var isCurrent = isCurrentNum === 1;
+                var isLatest = item.version === latestVersion;
+                
+                html += '<tr>';
+                html += '<td>' + (item.version ?? 'N/A') + '</td>';
+                html += '<td>' + isCurrentNum + '</td>';
+                html += '<td>' + formatDateTime(item.created_at) + '</td>';
+                html += '<td>';
+                
+                // Show Revert button only if:
+                // 1. Not current version (is_current = 0)
+                // 2. Not the latest version
+                // 3. Version number is valid
+                if (item.version != null && window.__activeSheetId && !isCurrent && !isLatest) {
+                    html += '<button class="btn btn-sm btn-outline-danger" title="Revert to version ' + item.version + '" onclick="revertSheetVersion(window.__activeSheetId,' + (item.version) + ')">Revert</button>';
+                } else {
+                    var reason = '';
+                    if (isCurrent) {
+                        reason = 'Current version';
+                    } else if (isLatest) {
+                        reason = 'Latest version';
+                    } else {
+                        reason = 'Invalid version';
+                    }
+                    html += '<span class="text-muted small">' + reason + '</span>';
+                }
+                html += '</td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            html += '</div>';
+        }
+        
+        if (data.version_history && data.version_history.length > 0) {
+            console.log('Found ' + data.version_history.length + ' rows with version history');
+            // Detailed Version History removed per request
+        } else {
+            html += '<p class="text-muted">No version history available for this sheet.</p>';
+        }
+        
+        html += '</div>';
+        $('#versionHistoryContent').html(html);
+    }
 
     // History UI removed
 
@@ -512,7 +1123,120 @@ $(document).ready(function() {
     z-index: 10;
 }
 
+/* Progress bar styling */
+.progress-bar-container {
+    padding: 10px 15px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
 
+.progress {
+    height: 8px;
+    margin-bottom: 5px;
+}
+
+.progress-bar {
+    background-color: #28a745;
+    transition: width 0.3s ease;
+}
+
+#saveProgressText {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* Version History Checkbox Styling */
+.form-check-inline {
+    margin-right: 0;
+}
+
+.form-check-input:checked {
+    background-color: #17a2b8;
+    border-color: #17a2b8;
+}
+
+.form-check-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-bottom: 0;
+}
+
+.text-warning {
+    color: #ffc107 !important;
+}
+
+/* Version History Modal Styling */
+.version-history {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.version-history h6 {
+    color: #495057;
+    margin-bottom: 15px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.version-history .table {
+    font-size: 0.875rem;
+}
+
+.version-history .badge {
+    font-size: 0.75rem;
+}
+
+.version-history .badge-success {
+    background-color: #28a745;
+}
+
+.version-history .badge-secondary {
+    background-color: #6c757d;
+}
+
+.version-history .badge-primary {
+    background-color: #007bff;
+}
+
+/* Accordion styling for version history */
+.accordion-button {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    color: #495057;
+    font-size: 0.9rem;
+    padding: 0.75rem 1rem;
+}
+
+.accordion-button:not(.collapsed) {
+    background-color: #e9ecef;
+    color: #495057;
+    border-color: #dee2e6;
+}
+
+.accordion-button:focus {
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    border-color: #80bdff;
+}
+
+.version-item {
+    background-color: #f8f9fa;
+    border-color: #dee2e6 !important;
+}
+
+.version-item .badge {
+    font-size: 0.75rem;
+}
+
+/* Modal close button styling */
+.btn-close {
+    background-size: 1em;
+    width: 1em;
+    height: 1em;
+}
+
+.btn-close:hover {
+    background-color: #e9ecef;
+}
 
 
 @media (max-width: 768px) {
@@ -523,6 +1247,26 @@ $(document).ready(function() {
 
 
 </style>
+
+<!-- Version History Modal -->
+<div class="modal fade" id="versionHistoryModal" tabindex="-1" aria-labelledby="versionHistoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="versionHistoryModalLabel">Version History</h5>
+                <button type="button" class="btn-close" onclick="closeVersionHistoryModal()" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="versionHistoryContent">
+                    <p class="text-muted">Loading version history...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeVersionHistoryModal()">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 {{-- History modal removed --}}
 @endsection

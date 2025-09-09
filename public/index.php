@@ -1,5 +1,8 @@
 <?php
 
+// Include PHP configuration for large file operations
+require_once __DIR__ . '/php-config.php';
+
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Http\Request;
 
