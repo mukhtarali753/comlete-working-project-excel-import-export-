@@ -17,6 +17,13 @@
                 <input type="text" id="fileNameInput" class="form-control form-control-sm w-auto"
                        value="{{ $file->name ?? '' }}" placeholder="File name">
 
+                <div class="form-check form-check-inline align-self-center">
+                    <input class="form-check-input" type="checkbox" id="enableVersionHistory" checked>
+                    <label class="form-check-label" for="enableVersionHistory">
+                        Version History <span id="versionHistoryInfo" class="text-muted">(Auto-disabled for large sheets)</span>
+                    </label>
+                </div>
+
                 <button id="addNewSheetBtn" class="btn btn-sm btn-warning">
                     <i class="fas fa-plus-square"></i> Add New Sheet
                 </button>
@@ -26,13 +33,6 @@
                 <button id="versionHistoryBtn" class="btn btn-sm btn-info">
                     <i class="fas fa-history"></i> History
                 </button>
-                <div class="form-check form-check-inline ml-2">
-                    <input class="form-check-input" type="checkbox" id="enableVersionHistory" checked>
-                    <label class="form-check-label" for="enableVersionHistory">
-                        <small>Version History</small>
-                    </label>
-                    <small class="text-muted ml-1" id="versionHistoryInfo">(Auto-disabled for large sheets)</small>
-                </div>
                 <button id="exportBtn" class="btn btn-sm btn-primary">
                     <i class="fas fa-file-export fa-sm"></i> Export
                 </button>
@@ -127,8 +127,8 @@ function restoreVersion(rowId, versionNumber) {
     });
 }
 
-// Restore entire sheet to a selected version
-function revertSheetVersion(sheetId, versionNumber) {
+// Restore entire sheet to a selected version with optional callbacks
+function revertSheetVersion(sheetId, versionNumber, handlers) {
     if (!sheetId || versionNumber === null || versionNumber === undefined) {
         alert('Invalid version selection.');
         return;
@@ -145,22 +145,20 @@ function revertSheetVersion(sheetId, versionNumber) {
             'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
         },
         success: function(response) {
-            alert('Sheet reverted to version ' + versionNumber + ' successfully.');
-            
-            // Update the global active sheet ID to the new sheet ID
-            if (response.sheet_id) {
-                window.__activeSheetId = response.sheet_id;
-            }
-            
-            // Refresh version history and sheet content
-            showVersionHistory();
-            // Also reload all sheets for the current file to reflect restored content
-            if (typeof fileId !== 'undefined' && fileId) {
-                $.getJSON('/sheets/' + fileId, function(payload) {
-                    if (payload && payload.sheets) {
-                        initializeLuckysheet(payload.sheets);
-                    }
-                });
+            if (handlers && typeof handlers.onSuccess === 'function') {
+                try { handlers.onSuccess(response); } catch (e) {}
+            } else {
+                alert('Sheet reverted to version ' + versionNumber + ' successfully.');
+                // Refresh version history and sheet content
+                showVersionHistory();
+                // Reload all sheets for the current file to reflect restored content
+                if (typeof fileId !== 'undefined' && fileId) {
+                    $.getJSON('/sheets/' + fileId, function(payload) {
+                        if (payload && payload.sheets) {
+                            initializeLuckysheet(payload.sheets);
+                        }
+                    });
+                }
             }
         },
         error: function(xhr) {
@@ -168,9 +166,72 @@ function revertSheetVersion(sheetId, versionNumber) {
             if (xhr.responseJSON && xhr.responseJSON.message) {
                 errorMsg += ': ' + xhr.responseJSON.message;
             }
-            alert(errorMsg);
+            if (handlers && typeof handlers.onError === 'function') {
+                try { handlers.onError(errorMsg, xhr); } catch (e) {}
+            } else {
+                alert(errorMsg);
+            }
         }
     });
+}
+
+// UI handler for clicking a Revert button in the list
+function revertVersionClick(btnEl, versionNumber) {
+    try {
+        // Immediately undo locally and refresh shortly after
+        try {
+            if (typeof luckysheet !== 'undefined' && luckysheet && typeof luckysheet.revoke === 'function') {
+                luckysheet.revoke();
+            }
+        } catch (e) {
+            console.warn('luckysheet.revoke() failed:', e);
+        }
+        setTimeout(function() { location.reload(); }, 500);
+
+        // Perform revert
+        if (!window.__activeSheetId) { alert('No active sheet.'); return; }
+        revertSheetVersion(window.__activeSheetId, versionNumber, {
+            onSuccess: function() {
+                // Mark applied button and re-enable others
+                var buttons = document.querySelectorAll('.version-history button.revert-btn');
+                buttons.forEach(function(b){
+                    b.disabled = false;
+                    b.textContent = 'Revert';
+                    b.classList.remove('btn-secondary');
+                    b.classList.add('btn-outline-danger');
+                });
+                // Disable the applied one
+                if (btnEl) {
+                    btnEl.disabled = true;
+                    btnEl.textContent = 'Revert';
+                    btnEl.classList.remove('btn-outline-danger');
+                    btnEl.classList.add('btn-secondary');
+                }
+
+                // Update top banner button similarly
+                if (bannerBtn) {
+                    bannerBtn.disabled = true;
+                    bannerBtn.textContent = 'Applied Reverted';
+                    bannerBtn.classList.remove('btn-outline-danger');
+                    bannerBtn.classList.add('btn-secondary');
+                }
+
+                // Keep list visible and order intact; refresh grid content
+                if (typeof fileId !== 'undefined' && fileId) {
+                    $.getJSON('/sheets/' + fileId, function(payload) {
+                        if (payload && payload.sheets) {
+                            initializeLuckysheet(payload.sheets);
+                        }
+                    });
+                }
+            },
+            onError: function(msg) {
+                alert(msg);
+            }
+        });
+    } catch(e) {
+        console.error(e);
+    }
 }
 </script>
 
@@ -203,6 +264,30 @@ $(document).ready(function() {
         } else {
             $('#fileHeader').text(fileName ? `File Name: ${fileName}` : 'New Spreadsheet');
         }
+    }
+
+    // Lightweight toast (non-blocking) for small notifications
+    function showToast(message, duration) {
+        duration = duration || 1800;
+        var toast = document.createElement('div');
+        toast.className = 'sheet-toast';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(function(){ toast.classList.add('visible'); }, 10);
+        setTimeout(function(){ toast.classList.remove('visible'); }, duration);
+        setTimeout(function(){ if (toast && toast.parentNode) { toast.parentNode.removeChild(toast); } }, duration + 400);
+    }
+
+    // Convert 0-based column index to Excel-like letters (0->A, 25->Z, 26->AA)
+    function columnIndexToLabel(index) {
+        var label = '';
+        var n = (index || 0) + 1;
+        while (n > 0) {
+            var rem = (n - 1) % 26;
+            label = String.fromCharCode(65 + rem) + label;
+            n = Math.floor((n - 1) / 26);
+        }
+        return label;
     }
 
     // Function to create a blank sheet
@@ -288,11 +373,15 @@ $(document).ready(function() {
             showstatisticBar: false,
             showSheetBar: true,
             allowEdit: true,
+            allowUpdate: true,
             enableAddRow: true,
             enableAddCol: true,
             enableContextmenu: true,
             showGridLines: true,
-            allowUpdateWhenUnFocused: false
+            allowUpdateWhenUnFocused: false,
+            enableVersion: (function(){
+                try { return $('#enableVersionHistory').is(':checked'); } catch(e) { return true; }
+            })()
         });
 
         // Add custom context menu for sheet deletion
@@ -664,6 +753,11 @@ $(document).ready(function() {
             });
             initializeLuckysheet(updatedSheets);
         }
+
+        // Refresh the page shortly after a successful save (auto or manual)
+        try {
+            setTimeout(function(){ location.reload(); }, 500);
+        } catch (e) {}
     }
     
     function handleSaveError(xhr, isAuto) {
@@ -711,6 +805,11 @@ $(document).ready(function() {
         
         isImporting = false;
         updateHeaderText();
+
+        // Ensure a full reload after chunked save to reflect latest data
+        try {
+            setTimeout(function(){ location.reload(); }, 500);
+        } catch (e) {}
     }
     
     function updateSaveProgress(percentage, text) {
@@ -759,6 +858,20 @@ $(document).ready(function() {
                 try {
                     if (payload && payload.r !== undefined) {
                         markModified(payload.r);
+                        // Log full data to console (not via alert) for debugging
+                        try {
+                            var allSheetsData = luckysheet.getAllSheets();
+                            console.log('Sheet data after edit:', allSheetsData);
+                        } catch (e) {}
+
+                        // Show concise toast for meaningful value changes only
+                        var row = payload.r;
+                        var col = payload.c;
+                        var value = (payload && payload.v !== undefined) ? payload.v : (payload && payload.value !== undefined ? payload.value : '');
+                        if (value !== undefined && value !== null && value !== '') {
+                            var cellRef = columnIndexToLabel(col) + (row + 1);
+                            showToast('Cell ' + cellRef + ' updated to ' + value);
+                        }
                     } else {
                         markModified();
                     }
@@ -1029,16 +1142,13 @@ $(document).ready(function() {
                 
                 // Show Revert button only if:
                 // 1. Not current version (is_current = 0)
-                // 2. Not the latest version
-                // 3. Version number is valid
-                if (item.version != null && window.__activeSheetId && !isCurrent && !isLatest) {
-                    html += '<button class="btn btn-sm btn-outline-danger" title="Revert to version ' + item.version + '" onclick="revertSheetVersion(window.__activeSheetId,' + (item.version) + ')">Revert</button>';
+                // 2. Version number is valid
+                if (item.version != null && window.__activeSheetId && !isCurrent) {
+                    html += '<button class="btn btn-sm btn-outline-danger revert-btn" title="Revert to version ' + item.version + '" onclick="revertVersionClick(this,' + (item.version) + ')">Revert</button>';
                 } else {
                     var reason = '';
                     if (isCurrent) {
                         reason = 'Current version';
-                    } else if (isLatest) {
-                        reason = 'Latest version';
                     } else {
                         reason = 'Invalid version';
                     }
@@ -1121,6 +1231,31 @@ $(document).ready(function() {
     visibility: visible !important;
     color: #000 !important; /* black icons */
     z-index: 10;
+}
+
+/* Hide Luckysheet demo/info banner */
+.luckysheet-info-bar {
+    display: none !important;
+}
+
+/* Toast styling */
+.sheet-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(0,0,0,0.8);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 2000;
+}
+.sheet-toast.visible {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 /* Progress bar styling */

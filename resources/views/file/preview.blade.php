@@ -147,6 +147,10 @@ $(document).ready(function () {
         }
 
         $.ajax({
+            
+
+                
+
             url: "{{ route('businesses.store') }}",
             method: "POST",
             data: {

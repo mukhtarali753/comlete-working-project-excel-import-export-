@@ -46,9 +46,9 @@ class ExcelImportController extends Controller
             return back()->with('error', 'Error reading file: ' . $e->getMessage());
         }
     }
-
+                                              
     public function import(Request $request)
-    {
+    { 
         $request->validate([
             'file_path' => 'required|string',
             'file_name' => 'required|string',

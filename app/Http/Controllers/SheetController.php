@@ -16,6 +16,7 @@ class SheetController extends Controller
 {
     public function index()
     {
+        // dd('test');
         $businesses = [];
         return view('file.preview', compact('businesses'));
     }
@@ -66,16 +67,18 @@ class SheetController extends Controller
 
             DB::beginTransaction();
 
+            // Determine if this is a brand new file creation (create-sheet flow)
+            $isNewFileCreation = empty($data['file_id']);
+
             $file = null;
 
-            if (!empty($data['file_id'])) {
+            if (!$isNewFileCreation) {
                 $file = File::find($data['file_id']);
                 if (!$file) {
                     throw new \Exception('File not found with ID: ' . $data['file_id']);
                 }
-            }
-
-            if (!$file) {
+            } else {
+                // Align with import behavior: create file record upfront
                 $file = File::create([
                     'name' => $data['name'],
                     'user_id' => Auth::check() ? Auth::id() : null,
@@ -90,7 +93,7 @@ class SheetController extends Controller
             // Track which sheets we're processing
             $updatedSheetIds = [];
 
-            foreach ($data['sheets'] as $sheetData) {
+            foreach ($data['sheets'] as $index => $sheetData) {
                 // Validate sheet data (excluding file_id since it's handled at the file level)
                 $sheetValidationRules = Sheet::getBasicValidationRules();
                 $sheetValidationRules['data'] = 'required|string';
@@ -100,130 +103,108 @@ class SheetController extends Controller
                     throw new \Exception('Validation failed for sheet: ' . $validator->errors()->first());
                 }
 
-                // Handle new sheets vs existing sheets differently
-                if (!empty($sheetData['id'])) {
-                    // Find existing sheet
-                    $existingSheet = Sheet::where('id', $sheetData['id'])
-                        ->where('file_id', $file->id)
-                        ->first();
-                    
-                    if ($existingSheet) {
-                        // For existing sheets, update the current sheet instead of creating new entries
-                        // This avoids the unique constraint issue while still maintaining version history
-                        
-                        // Create version history before updating
-                        if (!empty($sheetData['data'])) {
-                            $this->createVersionHistoryForSheet($existingSheet);
-                            
-                            // Increment the sheet version number
-                            $maxVersion = SheetRowVersion::where('sheet_id', $existingSheet->id)->max('version_number');
-                            $nextVersion = (is_null($maxVersion) ? 0 : (int)$maxVersion) + 1;
-                            $existingSheet->version = $nextVersion;
-                        }
-                        
-                        // Update the existing sheet
-                        $existingSheet->update([
-                            'data' => $sheetData['data'],
-                            'config' => $sheetData['config'] ?? null,
-                            'celldata' => $sheetData['celldata'] ?? null,
-                            'version' => $existingSheet->version,
-                            'updated_at' => now(),
-                        ]);
-                        
-                        $sheet = $existingSheet;
-                    } else {
-                        // Sheet ID provided but not found, check if sheet with same name exists
-                        $existingSheet = Sheet::where('file_id', $file->id)
-                            ->where('name', $sheetData['name'])
-                            ->first();
-                        
-                        if ($existingSheet) {
-                            // Use existing sheet with same name
-                            $sheet = $existingSheet;
-                        } else {
-                            // Generate unique name for new sheet
-                            $baseName = $sheetData['name'];
-                            $counter = 1;
-                            $uniqueName = $baseName;
-                            
-                            while (Sheet::where('file_id', $file->id)->where('name', $uniqueName)->exists()) {
-                                $uniqueName = $baseName . ' (' . $counter . ')';
-                                $counter++;
-                            }
-                            
-                            $sheet = Sheet::create([
-                                'file_id' => $file->id,
-                                'name' => $uniqueName,
-                                'order' => $sheetData['order'] ?? 0,
-                                'data' => $sheetData['data'],
-                                'config' => $sheetData['config'] ?? null,
-                                'celldata' => $sheetData['celldata'] ?? null,
-                                'version' => 1,
-                                'is_current' => 1,
-                            ]);
-                        }
-                    }
-                } else {
-                    // Create new sheet, but check for duplicate names
-                    $baseName = $sheetData['name'];
-                    $counter = 1;
+                if ($isNewFileCreation) {
+                    // Create-sheet should behave like import: unique name, no versioning, simple row insert
+                    $baseName = $sheetData['name'] ?: ('Sheet' . ($index + 1));
                     $uniqueName = $baseName;
-                    
+                    $counter = 1;
                     while (Sheet::where('file_id', $file->id)->where('name', $uniqueName)->exists()) {
                         $uniqueName = $baseName . ' (' . $counter . ')';
                         $counter++;
                     }
-                    
+
                     $sheet = Sheet::create([
                         'file_id' => $file->id,
                         'name' => $uniqueName,
-                        'order' => $sheetData['order'] ?? 0,
-                        'data' => $sheetData['data'],
-                        'config' => $sheetData['config'] ?? null,
-                        'celldata' => $sheetData['celldata'] ?? null,
-                        'version' => 1,
-                        'is_current' => 1,
+                        'order' => $sheetData['order'] ?? $index,
                     ]);
-                }
 
-                $updatedSheetIds[] = $sheet->id;
+                    $updatedSheetIds[] = $sheet->id;
 
-                // Only create version history if this is an existing sheet with data and version history is enabled
-                // Also check if the sheet is too large (more than 1000 rows) to prevent timeouts
-                $rowCount = $sheet->rows()->count();
-                $shouldCreateVersionHistory = !empty($sheetData['id']) && $rowCount > 0 && 
-                    (!isset($data['enable_version_history']) || $data['enable_version_history']) &&
-                    $rowCount <= 1000; // Limit version history to sheets with 1000 rows or less
-                
-                Log::info('Sheet ' . $sheet->id . ' - Row count: ' . $rowCount . ', Should create version history: ' . ($shouldCreateVersionHistory ? 'Yes' : 'No'));
-                
-                if ($shouldCreateVersionHistory) {
-                    Log::info('Creating version history for sheet ' . $sheet->id);
-                    $this->createVersionHistoryForSheet($sheet);
-                } elseif ($rowCount > 1000) {
-                    Log::info('Skipping version history for large sheet ' . $sheet->id . ' with ' . $rowCount . ' rows');
+                    // Build rows similar to import: store header row and non-empty rows
+                    $rows2D = json_decode($sheetData['data'], true) ?: [];
+                    $insertRows = [];
+                    foreach ($rows2D as $rowIndex => $row) {
+                        if (!is_array($row)) { continue; }
+                        $cleanRow = [];
+                        $hasContent = false;
+                        foreach ($row as $cell) {
+                            $value = is_array($cell) && array_key_exists('v', $cell) ? trim((string)$cell['v']) : (is_string($cell) ? trim($cell) : '');
+                            $cleanRow[] = $value;
+                            if ($value !== '') { $hasContent = true; }
+                        }
+                        if ($hasContent || $rowIndex === 0) {
+                            $insertRows[] = [
+                                'sheet_id' => $sheet->id,
+                                'sheet_data' => json_encode($cleanRow),
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ];
+                        }
+                    }
+                    if (!empty($insertRows)) {
+                        SheetRow::insert($insertRows);
+                    }
                 } else {
-                    Log::info('Skipping version history for sheet ' . $sheet->id . ' - Conditions not met');
-                }
-
-                // Delete all existing rows for this sheet and rebuild from payload
-                SheetRow::where('sheet_id', $sheet->id)->delete();
-
-                $rows = json_decode($sheetData['data'], true);
-
-                // Process rows in chunks to prevent memory issues
-                $chunkSize = 50; // Reduced chunk size for better performance
-                $rowChunks = array_chunk($rows, $chunkSize, true);
-                $totalChunks = count($rowChunks);
-
-                foreach ($rowChunks as $chunkIndex => $rowChunk) {
-                    $this->processRowChunk($sheet, $rowChunk, $chunkIndex * $chunkSize);
+                    // Existing file flow: Google Sheets-like versioning
+                    $enableVersionHistory = $data['enable_version_history'] ?? false;
+                    $sheet = null;
                     
-                    // Log progress for large operations
-                    if ($totalChunks > 10 && $chunkIndex % 10 === 0) {
-                        Log::info('Processing sheet ' . $sheet->id . ': ' . round(($chunkIndex / $totalChunks) * 100, 1) . '% complete');
+                    if (!empty($sheetData['id'])) {
+                        // Updating existing sheet by ID
+                        $existingSheet = Sheet::where('id', $sheetData['id'])
+                            ->where('file_id', $file->id)
+                            ->first();
+                        
+                        if ($existingSheet) {
+                            $sheet = $this->updateExistingSheet($existingSheet, $sheetData, $enableVersionHistory);
+                        } else {
+                            // Sheet ID not found, treat as new sheet
+                            $sheet = $this->createNewSheet($file, $sheetData, $enableVersionHistory);
+                        }
+                    } else {
+                        // Updating by name or creating new sheet
+                        $baseName = $this->getBaseName($sheetData['name']);
+                        $currentSheet = $this->lineageQuery($file->id, $baseName)
+                            ->where('is_current', 1)
+                            ->first();
+                        
+                        if ($currentSheet) {
+                            $sheet = $this->updateExistingSheet($currentSheet, $sheetData, $enableVersionHistory);
+                        } else {
+                            $sheet = $this->createNewSheet($file, $sheetData, $enableVersionHistory);
+                        }
+                    }
+
+                    $updatedSheetIds[] = $sheet->id;
+
+                    // Process row updates if provided
+                    if (!empty($sheetData['rowUpdates'])) {
+                        $this->applyRowUpdates($sheet, $sheetData['rowUpdates'], $enableVersionHistory);
+                    } else {
+                        // Rebuild rows for the newly created version from payload
+                        SheetRow::where('sheet_id', $sheet->id)->delete();
+                        $rows = json_decode($sheetData['data'], true);
+                        $chunkSize = 50; // Reduced chunk size for better performance
+                        $rowChunks = array_chunk($rows, $chunkSize, true);
+                        $totalChunks = count($rowChunks);
+
+                        foreach ($rowChunks as $chunkIndex => $rowChunk) {
+                            $this->processRowChunk($sheet, $rowChunk, $chunkIndex * $chunkSize);
+                            if ($totalChunks > 10 && $chunkIndex % 10 === 0) {
+                                Log::info('Processing sheet ' . $sheet->id . ': ' . round(($chunkIndex / $totalChunks) * 100, 1) . '% complete');
+                            }
+                        }
                     }
                 }
+            }
+
+            // If create-sheet flow, remove empty sheets (no rows), matching import behavior
+            if ($isNewFileCreation) {
+                $emptySheets = Sheet::where('file_id', $file->id)
+                    ->whereDoesntHave('rows')
+                    ->get();
+                foreach ($emptySheets as $emptySheet) { $emptySheet->delete(); }
             }
 
             // Note: We're not automatically deleting sheets that aren't in the current request
@@ -248,6 +229,70 @@ class SheetController extends Controller
                 'message' => 'Failed to save sheets: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Update an existing sheet with Google Sheets-like versioning
+     */
+    private function updateExistingSheet(Sheet $existingSheet, array $sheetData, bool $enableVersionHistory): Sheet
+    {
+        $baseName = $this->getBaseName($existingSheet->name);
+        
+        // Mark current sheet as not current
+        $existingSheet->update(['is_current' => 0]);
+        
+        // Create version history if enabled
+        if ($enableVersionHistory) {
+            $this->createVersionHistoryForSheet($existingSheet);
+        }
+        
+        // Get next unique version number (derived from version column and name suffixes)
+        $nextVersion = $this->getNextVersion($existingSheet->file_id, $baseName);
+        // Ensure the generated display name is unique even if legacy rows have null version but suffixed names
+        $displayName = $this->generateUniqueVersionedName($existingSheet->file_id, $baseName, $nextVersion);
+        
+        // Create new version
+        $newSheet = Sheet::create([
+            'file_id' => $existingSheet->file_id,
+            'name' => $displayName,
+            'order' => $existingSheet->order,
+            'data' => $sheetData['data'],
+            'config' => $sheetData['config'] ?? $existingSheet->config,
+            'celldata' => $sheetData['celldata'] ?? $existingSheet->celldata,
+            'version' => $nextVersion,
+            'is_current' => 1,
+        ]);
+        
+        return $newSheet;
+    }
+    
+    /**
+     * Create a new sheet with proper versioning
+     */
+    private function createNewSheet(File $file, array $sheetData, bool $enableVersionHistory): Sheet
+    {
+        $baseName = $this->getBaseName($sheetData['name']);
+        
+        // Ensure no other sheet with this base name is current
+        $this->ensureSingleCurrentVersion($file->id, $baseName);
+        
+        // Get next version number and ensure unique display name
+        $nextVersion = $this->getNextVersion($file->id, $baseName);
+        $displayName = $this->generateUniqueVersionedName($file->id, $baseName, $nextVersion);
+        
+        // Create new sheet
+        $sheet = Sheet::create([
+            'file_id' => $file->id,
+            'name' => $displayName,
+            'order' => $sheetData['order'] ?? 0,
+            'data' => $sheetData['data'],
+            'config' => $sheetData['config'] ?? null,
+            'celldata' => $sheetData['celldata'] ?? null,
+            'version' => $nextVersion,
+            'is_current' => 1,
+        ]);
+        
+        return $sheet;
     }
 
     /**
@@ -366,6 +411,75 @@ class SheetController extends Controller
     }
 
     /**
+     * Update a single sheet with Google Sheets-like versioning
+     */
+    public function updateSheet(Request $request, $sheetId)
+    {
+        try {
+            $data = $request->validate([
+                'name' => 'required|string|max:255',
+                'data' => 'required|string',
+                'config' => 'nullable|string',
+                'celldata' => 'nullable|string',
+                'enable_version_history' => 'nullable|boolean',
+            ]);
+
+            DB::beginTransaction();
+
+            $existingSheet = Sheet::findOrFail($sheetId);
+            $enableVersionHistory = $data['enable_version_history'] ?? false;
+
+            // Create version history if enabled
+            if ($enableVersionHistory) {
+                $this->createVersionHistoryForSheet($existingSheet);
+            }
+
+            // Mark current sheet as not current
+            $existingSheet->update(['is_current' => 0]);
+
+            // Get next version number
+            $baseName = $this->getBaseName($existingSheet->name);
+            $nextVersion = $this->getNextVersion($existingSheet->file_id, $baseName);
+
+            // Create new version
+            $newSheet = Sheet::create([
+                'file_id' => $existingSheet->file_id,
+                'name' => $this->generateVersionedName($baseName, $nextVersion),
+                'order' => $existingSheet->order,
+                'data' => $data['data'],
+                'config' => $data['config'] ?? $existingSheet->config,
+                'celldata' => $data['celldata'] ?? $existingSheet->celldata,
+                'version' => $nextVersion,
+                'is_current' => 1,
+            ]);
+
+            // Rebuild rows for the new version
+            SheetRow::where('sheet_id', $newSheet->id)->delete();
+            $rows = json_decode($data['data'], true);
+            if ($rows) {
+                $chunkSize = 50;
+                $rowChunks = array_chunk($rows, $chunkSize, true);
+                foreach ($rowChunks as $chunkIndex => $rowChunk) {
+                    $this->processRowChunk($newSheet, $rowChunk, $chunkIndex * $chunkSize);
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Sheet updated successfully',
+                'sheet_id' => $newSheet->id,
+                'version' => $newSheet->version,
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Failed to update sheet: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Apply targeted row updates, preserving existing data and creating versions when enabled
      */
     private function applyRowUpdates(Sheet $sheet, array $rowUpdates, bool $enableVersionHistory): void
@@ -454,7 +568,7 @@ class SheetController extends Controller
 
     public function show(File $file)
     {
-        $sheets = $file->sheets()->orderBy('order')->get()->map(function ($sheet) {
+        $sheets = $file->sheets()->where('is_current', 1)->orderBy('order')->get()->map(function ($sheet) {
             $rows = $sheet->rows->map(function ($row) {
                 // Reconstruct row from sparse maps: sheet_data[colIndex] => value, cell_formatting[colIndex] => format
                 $values = is_array($row->sheet_data) ? $row->sheet_data : (is_string($row->sheet_data) ? json_decode($row->sheet_data, true) : []);
@@ -511,7 +625,7 @@ class SheetController extends Controller
     public function getSheetsByFile($id)
     {
         $file = File::findOrFail($id);
-        $sheets = $file->sheets()->orderBy('order')->get(['id','name','order']);
+        $sheets = $file->sheets()->where('is_current', 1)->orderBy('order')->get(['id','name','order']);
         return response()->json($sheets);
     }
 
@@ -841,8 +955,7 @@ class SheetController extends Controller
     }
 
     /**
-     * Restore an entire sheet to a selected version.
-     * This updates the current sheet with the selected version's data from sheet_row_versions.
+     * Restore a previous version of a sheet (revert functionality) - Google Sheets style
      */
     public function restoreSheetVersion($sheetId, $versionNumber)
     {
@@ -858,35 +971,65 @@ class SheetController extends Controller
                 'file_id' => $currentSheet->file_id
             ]);
 
-            // Get version history entries for the target version
-            $versionEntries = SheetRowVersion::where('sheet_id', $currentSheet->id)
-                ->where('version_number', (int)$versionNumber)
-                ->get();
+            // Get base name for lineage
+            $baseName = $this->getBaseName($currentSheet->name);
+            
+            // Find the source sheet with the target version
+            $sourceSheet = $this->lineageQuery($currentSheet->file_id, $baseName)
+                ->where('version', (int)$versionNumber)
+                ->first();
 
-            if ($versionEntries->isEmpty()) {
-                throw new \Exception('Version ' . $versionNumber . ' not found in version history');
+            if (!$sourceSheet) {
+                // Try alternative approach - get all versions and find by display version
+                $allVersions = $this->lineageQuery($currentSheet->file_id, $baseName)
+                    ->orderBy('version', 'desc')
+                    ->get();
+                
+                $targetSheet = null;
+                foreach ($allVersions as $sheet) {
+                    $displayVersion = is_null($sheet->version) || (int)$sheet->version < 1 ? 1 : (int)$sheet->version;
+                    if ($displayVersion === (int)$versionNumber) {
+                        $targetSheet = $sheet;
+                        break;
+                    }
+                }
+                
+                if (!$targetSheet) {
+                    throw new \Exception('Source sheet version ' . $versionNumber . ' not found');
+                }
+                $sourceSheet = $targetSheet;
             }
 
-            // Create version history for current sheet before restoring
+            // Guard: cannot revert the current version
+            if ((int)$sourceSheet->is_current === 1) {
+                throw new \Exception('Cannot revert the current version');
+            }
+
+            // Create version history for current sheet before reverting (row-level snapshot)
             $this->createVersionHistoryForSheet($currentSheet);
 
-            // Replace current sheet rows with the historical rows
-            SheetRow::where('sheet_id', $currentSheet->id)->delete();
+            // Overwrite current sheet in place: keep same ID, name, and order
+            $currentSheet->data = $sourceSheet->data;
+            $currentSheet->config = $sourceSheet->config;
+            $currentSheet->celldata = $sourceSheet->celldata;
+            // Do not change version/name/order/is_current
+            $currentSheet->save();
 
-            // Restore rows from version history
-            if ($versionEntries->count() > 0) {
+            // Replace rows of current sheet with rows from the selected source version
+            SheetRow::where('sheet_id', $currentSheet->id)->delete();
+            $sourceRows = SheetRow::where('sheet_id', $sourceSheet->id)->get();
+            if ($sourceRows->count() > 0) {
                 $insertRows = [];
                 $now = now();
-                foreach ($versionEntries as $versionEntry) {
-                    // Ensure sheet_data is properly encoded
-                    $sheetData = is_string($versionEntry->sheet_data) ? $versionEntry->sheet_data : json_encode($versionEntry->sheet_data);
-                    
-                    // Ensure cell_formatting is properly encoded
-                    $cellFormatting = null;
-                    if ($versionEntry->cell_formatting) {
-                        $cellFormatting = is_string($versionEntry->cell_formatting) ? $versionEntry->cell_formatting : json_encode($versionEntry->cell_formatting);
+                foreach ($sourceRows as $row) {
+                    $sheetData = $row->sheet_data;
+                    if (!is_string($sheetData)) {
+                        $sheetData = json_encode($sheetData);
                     }
-                    
+                    $cellFormatting = $row->cell_formatting;
+                    if (!is_null($cellFormatting) && !is_string($cellFormatting)) {
+                        $cellFormatting = json_encode($cellFormatting);
+                    }
                     $insertRows[] = [
                         'sheet_id' => $currentSheet->id,
                         'sheet_data' => $sheetData,
@@ -898,12 +1041,17 @@ class SheetController extends Controller
                 SheetRow::insert($insertRows);
             }
 
+            // Persist the active version number on the current sheet so UI can reflect it after reload
+            $currentSheet->version = is_null($sourceSheet->version) || (int)$sourceSheet->version < 1
+                ? 1
+                : (int)$sourceSheet->version;
+            $currentSheet->save();
+
             DB::commit();
 
             return response()->json([
                 'message' => 'Sheet restored to version ' . $versionNumber . ' successfully',
                 'sheet_id' => $currentSheet->id,
-                'version' => $currentSheet->version,
             ], 200);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -958,39 +1106,23 @@ class SheetController extends Controller
             ]);
             
             // Sheet-level history (version, is_current, created_at)
-            // Since we're not creating multiple sheet entries, we'll use the sheet_row_versions table
-            // to track version history at the row level
-            $versionHistoryEntries = SheetRowVersion::where('sheet_id', $sheet->id)
-                ->orderBy('version_number', 'desc')
-                ->get();
-
-            // Group by version number to get unique versions
-            $uniqueVersions = $versionHistoryEntries->groupBy('version_number');
+            // Get all sheet versions for this lineage (base name + _vN)
+            $baseName = $this->getBaseName($sheet->name);
+            $sheetLineage = $this->lineageQuery($sheet->file_id, $baseName)
+                ->orderBy('version', 'desc')
+                ->get(['id','name','version','is_current','updated_at']);
             
-            $sheetHistory = [];
-            foreach ($uniqueVersions as $versionNumber => $entries) {
-                $latestEntry = $entries->first();
-                $sheetHistory[] = [
-                    'sheet_id' => $sheet->id,
-                    'version' => $versionNumber,
-                    'is_current' => $versionNumber == $sheet->version,
-                    'created_at' => $latestEntry->created_at ? $latestEntry->created_at->toIso8601String() : null,
+            $sheetHistory = $sheetLineage->map(function($s) {
+                // Handle null/zero versions as version 1 for display
+                $displayVersion = is_null($s->version) || (int)$s->version < 1 ? 1 : (int)$s->version;
+                
+                return [
+                    'sheet_id' => $s->id,
+                    'version' => $displayVersion,
+                    'is_current' => (bool)$s->is_current,
+                    'created_at' => $s->updated_at ? $s->updated_at->toIso8601String() : null,
                 ];
-            }
-            
-            // Add current version if not already included
-            $currentVersionExists = collect($sheetHistory)->contains('version', $sheet->version);
-            if (!$currentVersionExists) {
-                $sheetHistory[] = [
-                    'sheet_id' => $sheet->id,
-                    'version' => $sheet->version ?? 1,
-                    'is_current' => true,
-                    'created_at' => $sheet->updated_at ? $sheet->updated_at->toIso8601String() : null,
-                ];
-            }
-            
-            // Sort by version number descending
-            $sheetHistory = collect($sheetHistory)->sortByDesc('version')->values()->toArray();
+            })->toArray();
 
             // Row-level history (existing behavior), kept for detailed drilldown
             $versionHistoryEntries = SheetRowVersion::where('sheet_id', $sheetId)
@@ -1059,14 +1191,95 @@ class SheetController extends Controller
      */
     private function ensureSingleCurrentVersion($fileId, $sheetName, $excludeSheetId = null)
     {
-        $query = Sheet::where('file_id', $fileId)
-            ->where('name', $sheetName);
+        // Match lineage by base name prefix to handle versioned names like MySheet_v2
+        $baseName = $this->getBaseName($sheetName);
+        $query = $this->lineageQuery($fileId, $baseName);
             
         if ($excludeSheetId) {
             $query->where('id', '!=', $excludeSheetId);
         }
         
         $query->update(['is_current' => 0]);
+    }
+
+    /**
+     * Build a lineage query that matches all versions of a base sheet name.
+     */
+    private function lineageQuery($fileId, $baseName)
+    {
+        return Sheet::where('file_id', $fileId)
+            ->where(function($q) use ($baseName) {
+                $q->where('name', $baseName)
+                  ->orWhere('name', 'LIKE', $baseName . '\\_v%');
+            });
+    }
+
+    /**
+     * Compute next version number for a lineage, treating null/zero versions as 1.
+     */
+    private function getNextVersion($fileId, $baseName)
+    {
+        // 1) Start from version column
+        $query = $this->lineageQuery($fileId, $baseName);
+        $maxVersionByColumn = $query->max('version');
+
+        // 2) Also consider suffixes in names like Base_vN for legacy rows with null version
+        $names = $this->lineageQuery($fileId, $baseName)->pluck('name')->toArray();
+        $maxVersionByName = 0;
+        foreach ($names as $name) {
+            if ($name === $baseName) {
+                $maxVersionByName = max($maxVersionByName, 1);
+                continue;
+            }
+            if (preg_match('/^' . preg_quote($baseName, '/') . '_v(\d+)$/', $name, $m)) {
+                $maxVersionByName = max($maxVersionByName, (int)$m[1]);
+            }
+        }
+
+        $maxVersion = max((int)($maxVersionByColumn ?? 0), (int)$maxVersionByName);
+        if ($maxVersion < 1) {
+            // No versions found at all
+            return 1;
+        }
+        return $maxVersion + 1;
+    }
+
+    /**
+     * Extract base name by removing a trailing _vN suffix if present.
+     */
+    private function getBaseName($name)
+    {
+        if (preg_match('/^(.*)_v\\d+$/', $name, $matches)) {
+            return $matches[1];
+        }
+        return $name;
+    }
+
+    /**
+     * Generate a versioned display name using base name and version.
+     */
+    private function generateVersionedName($baseName, $version)
+    {
+        if ((int)$version <= 1) {
+            return $baseName; // first version keeps base name
+        }
+        return $baseName . '_v' . (int)$version;
+    }
+
+    /**
+     * Generate a versioned display name that is guaranteed unique for a file.
+     */
+    private function generateUniqueVersionedName(int $fileId, string $baseName, int $startVersion): string
+    {
+        $version = max(1, (int)$startVersion);
+        do {
+            $candidate = $this->generateVersionedName($baseName, $version);
+            $exists = Sheet::where('file_id', $fileId)->where('name', $candidate)->exists();
+            if (!$exists) {
+                return $candidate;
+            }
+            $version++;
+        } while (true);
     }
 
     /**

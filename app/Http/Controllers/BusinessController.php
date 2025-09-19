@@ -10,6 +10,7 @@ class BusinessController extends Controller
 {
     public function preview()
     {
+        // dd('test');
 
         $files = File::all();
        
@@ -140,6 +141,8 @@ class BusinessController extends Controller
 
     public function store(Request $request)
     {
+
+        // dd($request->all());
         $validated = $request->validate([
             'name' => 'required|string|max:255',
         ]);
@@ -182,6 +185,7 @@ class BusinessController extends Controller
 
     public function excelPreview()
     {
+        
         $files = File::all(); // Add this line to fix the undefined variable error
         return view('file.preview', compact('files'));
     }
