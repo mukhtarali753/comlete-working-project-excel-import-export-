@@ -12,7 +12,7 @@ use App\Http\Controllers\ShopController;
 use App\Models\Stage;
 use App\Http\Controllers\ImportController;
 use App\Http\Controllers\ExcelController;
-use App\Http\Controllers\BusinessController;
+use App\Http\Controllers\FileController;
 use App\Http\Controllers\ShopControlle;
 use App\Http\Controllers\SheetController;
 use App\Http\Controllers\ExcelImportController;
@@ -88,7 +88,6 @@ Route::post('/blocks/{id}', [ThemeController::class, 'updateBlock'])->name('them
 
 
 
-
 //board
 Route::get('/showboard', [BoardController::class, 'showBoard'])->name('showboard');
 Route::get('/create', [BoardController::class, 'create'])->name('create');
@@ -112,8 +111,6 @@ Route::get('/update-stage-row', [StageController::class, 'getStageRow'])
 
 
 
-
-
 Route::prefix('leads')->name('leads.')->group(function () {
     Route::get('/', [LeadController::class, 'index'])->name('board');
     Route::get('/create', [LeadController::class, 'create'])->name('create');
@@ -125,10 +122,9 @@ Route::prefix('leads')->name('leads.')->group(function () {
 });
 
 
-
 Route::prefix('leads')->name('leads.')->group(function () {
     Route::get('/{board?}', [LeadController::class, 'index'])->name('index');
-               
+                
     Route::put('/{id}', [LeadController::class, 'update'])->name('update');
     Route::post('/update-stage', [LeadController::class, 'updateStage'])->name('update-stage'); // Move Lead to another stage
     Route::delete('/{id}', [LeadController::class, 'destroy'])->name('destroy');
@@ -167,17 +163,17 @@ Route::post('shops/import', [ShopController::class, 'import'])->name('shops.impo
 
 
 
-Route::prefix('businesses')->controller(BusinessController::class)->group(function () {
-    Route::get('/preview', 'preview')->name('businesses.preview');
-    Route::get('/{business}/edit-sheet', 'editSheet')->name('businesses.edit.sheet');
+Route::prefix('businesses')->middleware(['auth'])->controller(FileController::class)->group(function () {
+    Route::get('/preview', 'preview')->name('file.preview');
+    Route::get('/{file}/edit-sheet', 'getsheet')->name('businesses.edit.sheet');
     Route::get('/export', 'export')->name('businesses.export');
     Route::post('/import', 'import')->name('businesses.import');
     Route::post('/update-inline', 'updateInline')->name('businesses.update.inline');
     Route::get('/excel-preview', 'excelPreview')->name('businesses.preview.excel');
     Route::post('/', 'store')->name('businesses.store');
-    Route::post('/{business}/update', 'update')->name('businesses.update');
-    Route::get('/{business}/edit', 'edit')->name('businesses.edit');
-    Route::delete('/{business}', 'destroy')->name('businesses.destroy');
+    Route::post('/{file}/update', 'update')->name('businesses.update');
+    Route::get('/{file}/edit', 'edit')->name('businesses.edit');
+    Route::delete('/{file}', 'destroy')->name('businesses.destroy');
 });
 
 Route::controller(SheetController::class)->group(function () {
@@ -191,14 +187,16 @@ Route::controller(SheetController::class)->group(function () {
     Route::get('/files/{id}/sheets', 'getSheetsByFile');
     Route::delete('/sheets/{id}', 'deleteSheet')->name('sheets.delete');
     Route::get('/export/{file}/{type}', 'export')->name('sheets.export');
-    Route::get('/test-import', 'testImport')->name('sheets.test'); // Test route for debugging
+    Route::get('/test-import', 'testImport')->name('sheets.test'); 
     
     // Version history routes
     Route::get('/row/{rowId}/versions', 'getRowVersionHistory')->name('sheets.row.versions');
     Route::get('/sheet/{sheetId}/versions', 'getSheetVersionHistory')->name('sheets.sheet.versions');
+    Route::get('/sheet/{sheetId}/debug', 'debugSheetVersions')->name('sheets.sheet.debug');
     Route::post('/row/{rowId}/restore/{versionNumber}', 'restoreRowVersion')->name('sheets.row.restore');
     Route::post('/sheet/{sheetId}/restore/{versionNumber}', 'restoreSheetVersion')->name('sheets.sheet.restore');
 });
+
 
 
 // Excel Import Routes
@@ -214,8 +212,6 @@ Route::prefix('excel-import')->name('excel.import.')->middleware(['auth'])->grou
 
 
 
-
-
-
-
 require __DIR__ . '/auth.php';
+require __DIR__ . '/fileV2.php';
+require __DIR__ . '/sheetV2.php';

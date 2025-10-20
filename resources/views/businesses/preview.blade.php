@@ -1,12 +1,12 @@
 @extends('layouts.theme')
 
-@section('title','Business Preview Table')
+@section('title','file Preview Table')
 
 @section('content')
 <div class="container-fluid mt-4">
     <div class="card shadow mb-4">
         <div class="card-header py-3 d-flex justify-content-between align-items-center">
-            <h5 class="m-0 font-weight-bold text-primary">Business Data Management</h5>
+            <h5 class="m-0 font-weight-bold text-primary">File & Sheet Management</h5>
             <div>
                 <button id="exportBtn" class="btn btn-success btn-sm">
                     <i class="fas fa-file-export"></i> Export
@@ -73,7 +73,7 @@
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Import Businesses</h5>
+                <h5 class="modal-title">Import Files</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form id="importForm" action="{{ route('businesses.import') }}" method="POST" enctype="multipart/form-data">
@@ -100,14 +100,14 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Add New Business</h5>
+                <h5 class="modal-title">Add New File</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form id="addRowForm">
                 @csrf
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label for="newName" class="form-label">Business Name</label>
+                        <label for="newName" class="form-label">File Name</label>
                         <input type="text" class="form-control" id="newName" required>
                     </div>
                     <div class="mb-3">
@@ -132,7 +132,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Business</button>
+                    <button type="submit" class="btn btn-primary">Add File</button>
                 </div>
             </form>
         </div>
@@ -247,7 +247,7 @@
                     $('#addRowForm')[0].reset();
                     $('#addRowModal').modal('hide');
                     
-                    toastr.success('Business added successfully!');
+                    toastr.success('File added successfully!');
                 },
                 error: function(xhr) {
                     toastr.error(xhr.responseJSON?.message || 'Failed to add business. Please try again.');
@@ -260,7 +260,7 @@
             const row = $(this).closest('tr');
             const id = $(this).data('id');
             
-            if (confirm('Are you sure you want to delete this business?')) {
+            if (confirm('Are you sure you want to delete this file?')) {
                 $.ajax({
                     url: `/businesses/${id}`,
                     type: "DELETE",
@@ -269,7 +269,7 @@
                     },
                     success: function(response) {
                         row.remove();
-                        toastr.success('Business deleted successfully!');
+                        toastr.success('File deleted successfully!');
                     },
                     error: function(xhr) {
                         toastr.error('Failed to delete business. Please try again.');

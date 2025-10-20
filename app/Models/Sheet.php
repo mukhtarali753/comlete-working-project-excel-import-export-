@@ -26,9 +26,7 @@ class Sheet extends Model
         // return $this->hasMany(SheetRow::class)->where('version', 0);
     }
 
-    /**
-     * Get validation rules for creating/updating sheets
-     */
+   
     public static function getValidationRules($fileId, $excludeId = null)
     {
         $rules = [

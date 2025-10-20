@@ -1,0 +1,64 @@
+/* File Manager V2 Styles */
+.file-manager-v2 {
+    background-color: #f8f9fa;
+}
+
+.file-manager-v2 .card {
+    border: none;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.file-manager-v2 .card-header {
+    background-color: #fff;
+    border-bottom: 1px solid #dee2e6;
+    
+}
+
+.file-manager-v2 .table {
+    margin-bottom: 0;
+}
+
+.file-manager-v2 .table th {
+    background-color: #f8f9fa;
+    border-top: none;
+    font-weight: 600;
+}
+
+.file-manager-v2 .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+.file-manager-v2 .modal-header {
+    background-color: #007bff;
+    color: white;
+}
+
+.file-manager-v2 .modal-header .btn-close {
+    filter: invert(1);
+}
+
+/* V2 specific styling */
+.v2-badge {
+    background-color: #28a745;
+    color: white;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    margin-left: 0.5rem;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

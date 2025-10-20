@@ -1,6 +1,6 @@
 @extends('layouts.theme')
 
-@section('title', 'Business Preview Table')
+@section('title', 'file Preview Table')
 
 @section('content')
 <div class="container-fluid mt-4">
@@ -290,3 +290,5 @@ $(document).ready(function () {
 <input type="file" id="importSheetFileInput" accept=".xlsx,.xls,.csv" style="display: none;">
 
 @endsection
+
+

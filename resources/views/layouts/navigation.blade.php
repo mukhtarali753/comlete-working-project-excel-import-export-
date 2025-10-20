@@ -82,12 +82,23 @@
 
 
                  
-                <button>
+                {{-- <button>
                     
-                       <a href="{{ route('businesses.preview') }}">files</a>
+                       <a href="{{ route('file.preview') }}">Files</a>
                  
-                 </button>
+                 </button> --}}
 
+
+                 <button style="color: black">
+                    
+                       {{-- <a href="{{ route('fileV2.index') }}" 
+                          class="{{ request()->routeIs('fileV2.*') ? 'active' : '' }}" 
+                          style="color: #28a745; font-weight: bold;">
+                          Files V2  --}}
+                          {{-- <span style="background: #28a745; color: white; font-size: 0.7em; padding: 2px 4px; border-radius: 3px; margin-left: 4px;">NEW</span> --}}
+                       {{-- </a> --}}
+                 <a href="{{ route('fileV2.index') }}"> Files V2</a>
+                 </button>
 
                   
 
@@ -182,6 +193,9 @@
         <div class="pt-2 pb-3 space-y-1">
             <x-responsive-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
                 {{ __('Theme') }}
+            </x-responsive-nav-link>
+            <x-responsive-nav-link :href="route('fileV2.index')" :active="request()->routeIs('fileV2.*')">
+                {{ __('Files V2') }}
             </x-responsive-nav-link>
         </div>
 

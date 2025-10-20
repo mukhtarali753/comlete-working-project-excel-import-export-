@@ -1,6 +1,6 @@
 @extends('layouts.theme')
 
-@section('title', 'Excel sheet')
+@section('title', 'Excel Sheet V2')
 
 @section('content')
 <div class="container-fluid mt-4">
@@ -8,9 +8,9 @@
         <div class="card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
             <h6 class="m-0 font-weight-bold text-primary" id="fileHeader">
                 @if(isset($file))
-                    File Name: {{ $file->name ?? 'New Spreadsheet' }}
+                    File Name V2: {{ $file->name ?? 'New Spreadsheet' }}
                 @else
-                    Import File
+                    Import File V2
                 @endif
             </h6>
             <div class="d-flex flex-wrap align-items-center gap-2">
@@ -20,7 +20,7 @@
                 <div class="form-check form-check-inline align-self-center">
                     <input class="form-check-input" type="checkbox" id="enableVersionHistory" checked>
                     <label class="form-check-label" for="enableVersionHistory">
-                        Version History <span id="versionHistoryInfo" class="text-muted">(Auto-disabled for large sheets)</span>
+                        Version History V2 <span id="versionHistoryInfo" class="text-muted">(Auto-disabled for large sheets)</span>
                     </label>
                 </div>
 
@@ -107,7 +107,7 @@ function restoreVersion(rowId, versionNumber) {
     }
     
     $.ajax({
-        url: '/row/' + rowId + '/restore/' + versionNumber,
+        url: '/sheetV2/row/' + rowId + '/restore/' + versionNumber,
         type: 'POST',
         headers: {
             'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
@@ -139,7 +139,7 @@ function revertSheetVersion(sheetId, versionNumber, handlers) {
     }
 
     $.ajax({
-        url: '/sheet/' + sheetId + '/restore/' + versionNumber,
+        url: '/sheetV2/sheet/' + sheetId + '/restore/' + versionNumber,
         type: 'POST',
         headers: {
             'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
@@ -157,7 +157,7 @@ function revertSheetVersion(sheetId, versionNumber, handlers) {
                 }
                 // Reload all sheets for the current file to reflect restored content
                 if (typeof fileId !== 'undefined' && fileId) {
-                    $.getJSON('/sheets/' + fileId, function(payload) {
+                    $.getJSON('/sheetV2/sheets/' + fileId, function(payload) {
                         if (payload && payload.sheets) {
                             initializeLuckysheet(payload.sheets);
                         }
@@ -212,14 +212,6 @@ function revertVersionClick(btnEl, versionNumber) {
                     btnEl.classList.add('btn-secondary');
                 }
 
-                // Update top banner button similarly
-                if (typeof bannerBtn !== 'undefined' && bannerBtn) {
-                    bannerBtn.disabled = true;
-                    bannerBtn.textContent = 'Applied';
-                    bannerBtn.classList.remove('btn-outline-danger');
-                    bannerBtn.classList.add('btn-secondary');
-                }
-
                 // Reload the page automatically after successful revert
                 console.log('Revert successful, reloading page...');
                 setTimeout(function() {
@@ -262,9 +254,9 @@ $(document).ready(function() {
     function updateHeaderText() {
         const fileName = $('#fileNameInput').val().trim();
         if (isImporting) {
-            $('#fileHeader').text('Import File');
+            $('#fileHeader').text('Import File V2');
         } else {
-            $('#fileHeader').text(fileName ? `File Name: ${fileName}` : 'New Spreadsheet');
+            $('#fileHeader').text(fileName ? `File Name V2: ${fileName}` : 'New Spreadsheet V2');
         }
     }
 
@@ -273,7 +265,7 @@ $(document).ready(function() {
         duration = duration || 1800;
         var toast = document.createElement('div');
         toast.className = 'sheet-toast';
-        toast.textContent = message;
+        toast.textContent = message + ' (V2)';
         document.body.appendChild(toast);
         setTimeout(function(){ toast.classList.add('visible'); }, 10);
         setTimeout(function(){ toast.classList.remove('visible'); }, duration);
@@ -294,7 +286,7 @@ $(document).ready(function() {
 
     // Function to create a blank sheet
     function createBlankSheet(rows, cols) {
-        rows = rows || 16;
+        rows = rows || 16; // Same as original
         cols = cols || 26;
         var blankData = [];
         for (var i = 0; i < rows; i++) {
@@ -415,7 +407,7 @@ $(document).ready(function() {
         // If the sheet exists in the database (has an ID), send delete request
         if (sheetToDelete.id && fileId) {
             $.ajax({
-                url: '/sheets/' + sheetToDelete.id,
+                url: '/sheetV2/sheets/' + sheetToDelete.id,
                 type: 'DELETE',
                 headers: {
                     'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
@@ -442,20 +434,20 @@ $(document).ready(function() {
     }
 
     // Initialize Luckysheet
-    console.log('Initializing Luckysheet...');
+    console.log('Initializing Luckysheet V2...');
     initializeLuckysheet(initialSheets);
     updateHeaderText();
     
     // Initialize Luckysheet event handlers after a delay
     setTimeout(function() {
-        console.log('Attempting to initialize Luckysheet events...');
+        console.log('Attempting to initialize Luckysheet V2 events...');
         initializeLuckysheetEvents();
         initializeSheetSizeCheck();
     }, 1000);
     
     // Check initial sheet size
     setTimeout(function() {
-        console.log('Checking initial sheet size...');
+        console.log('Checking initial sheet size V2...');
         checkSheetSize();
     }, 1500);
 
@@ -646,7 +638,7 @@ $(document).ready(function() {
         var payload = buildSavePayload();
         
         // Debug: Log the payload structure
-        console.log('Save payload:', payload);
+        console.log('Save payload V2:', payload);
         console.log('Row updates for first sheet:', payload.sheets[0]?.rowUpdates);
         
         // Check if payload is too large and needs chunking
@@ -702,7 +694,7 @@ $(document).ready(function() {
     
     function performSave(payload, isAuto, callback) {
         $.ajax({
-            url: '{{ route("sheets.save") }}',
+            url: '{{ route("sheetV2.save") }}',
             type: 'POST',
             data: JSON.stringify(payload),
             contentType: 'application/json',
@@ -725,7 +717,7 @@ $(document).ready(function() {
         if (!isAuto) {
             $('#saveSheetBtn').prop('disabled', false).html('<i class="fas fa-save"></i> Save Data');
             $('#saveProgress').hide();
-            alert('Data saved successfully!');
+            alert('Data saved successfully! (V2)');
         }
         
         isImporting = false;
@@ -733,7 +725,7 @@ $(document).ready(function() {
         
         if (!fileId && response.file_id) {
             fileId = response.file_id;
-            window.history.replaceState({}, '', '/excel-preview/' + response.file_id);
+            window.history.replaceState({}, '', '/sheetV2/excel-preview/' + response.file_id);
         }
         
         if (response.sheets) {
@@ -757,7 +749,7 @@ $(document).ready(function() {
             initializeLuckysheet(updatedSheets);
         }
 
-        // Refresh the page shortly after a successful save (auto or manual)
+        // Refresh the page shortly after a successful save (exactly like original)
         try {
             setTimeout(function(){ location.reload(); }, 500);
         } catch (e) {}
@@ -769,7 +761,7 @@ $(document).ready(function() {
             $('#saveProgress').hide();
         }
         
-        var msg = 'Save failed';
+        var msg = 'Save failed (V2)';
         if (xhr.responseJSON && xhr.responseJSON.message) {
             msg += ': ' + xhr.responseJSON.message;
         } else if (xhr.statusText) {
@@ -784,7 +776,7 @@ $(document).ready(function() {
         if (!isAuto) {
             $('#saveSheetBtn').prop('disabled', false).html('<i class="fas fa-save"></i> Save Data');
             $('#saveProgress').hide();
-            alert('Large file saved successfully in chunks!');
+            alert('Large file saved successfully in chunks! (V2)');
         }
         
         // Update sheet IDs and clear modification flags
@@ -809,7 +801,7 @@ $(document).ready(function() {
         isImporting = false;
         updateHeaderText();
 
-        // Ensure a full reload after chunked save to reflect latest data
+        // Ensure a full reload after chunked save to reflect latest data (exactly like original)
         try {
             setTimeout(function(){ location.reload(); }, 500);
         } catch (e) {}
@@ -864,7 +856,7 @@ $(document).ready(function() {
                         // Log full data to console (not via alert) for debugging
                         try {
                             var allSheetsData = luckysheet.getAllSheets();
-                            console.log('Sheet data after edit:', allSheetsData);
+                            console.log('Sheet data after edit (V2):', allSheetsData);
                         } catch (e) {}
 
                         // Show concise toast for meaningful value changes only
@@ -888,9 +880,9 @@ $(document).ready(function() {
             luckysheet.on('cellMousedown', function() {});
             
             // Hook common toolbar actions that affect formatting via keydown already
-            console.log('Luckysheet events initialized successfully');
+            console.log('Luckysheet V2 events initialized successfully');
         } else {
-            console.log('Luckysheet not ready yet, retrying in 500ms...');
+            console.log('Luckysheet V2 not ready yet, retrying in 500ms...');
             setTimeout(initializeLuckysheetEvents, 500);
         }
     }
@@ -948,7 +940,7 @@ $(document).ready(function() {
         });
         
         // Generate file name and download
-        var fileName = $('#fileNameInput').val().trim() || 'export';
+        var fileName = $('#fileNameInput').val().trim() || 'export_v2';
         XLSX.writeFile(wb, fileName + '.xlsx');
     });
 
@@ -970,7 +962,7 @@ $(document).ready(function() {
     // Auto-disable version history for large sheets
     function checkSheetSize() {
         if (!isLuckysheetReady()) {
-            console.log('Luckysheet not ready for sheet size check');
+            console.log('Luckysheet V2 not ready for sheet size check');
             return;
         }
         
@@ -998,9 +990,9 @@ $(document).ready(function() {
             luckysheet.on('updated', function() {
                 checkSheetSize();
             });
-            console.log('Sheet size check initialized successfully');
+            console.log('Sheet size check V2 initialized successfully');
         } else {
-            console.log('Luckysheet not ready for sheet size check, retrying in 500ms...');
+            console.log('Luckysheet V2 not ready for sheet size check, retrying in 500ms...');
             setTimeout(initializeSheetSizeCheck, 500);
         }
     }
@@ -1060,7 +1052,7 @@ $(document).ready(function() {
             // Fallback: use currently focused position or first sheet
             activeSheet = allSheets[0] || null;
         }
-        console.log('Resolved active sheet:', activeSheet);
+        console.log('Resolved active sheet V2:', activeSheet);
         
         if (!activeSheet || !activeSheet.id) {
             console.log('No active sheet or sheet ID found');
@@ -1074,13 +1066,13 @@ $(document).ready(function() {
 
         // Fetch version history for the active sheet
         $.ajax({
-            url: '/sheet/' + activeSheet.id + '/versions',
+            url: '/sheetV2/sheet/' + activeSheet.id + '/versions',
             type: 'GET',
             headers: {
                 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
             },
             success: function(response) {
-                console.log('Version history response:', response);
+                console.log('Version history response V2:', response);
                 if (response.version_history && response.version_history.length > 0) {
                     console.log('First row history:', response.version_history[0]);
                     if (response.version_history[0].versions && response.version_history[0].versions.length > 0) {
@@ -1113,10 +1105,10 @@ $(document).ready(function() {
 
     // Function to display version history
     function displayVersionHistory(data) {
-        console.log('Displaying version history:', data);
+        console.log('Displaying version history V2:', data);
         var html = '<div class="version-history">';
         var sheetLabel = (typeof window.__activeSheetName !== 'undefined' && window.__activeSheetName) ? window.__activeSheetName : (data.sheet_name || 'Unknown');
-        html += '<h6>Sheet: ' + sheetLabel + '</h6>';
+        html += '<h6>Sheet V2: ' + sheetLabel + '</h6>';
         
         // Sheet-level history table (version, is_current, timestamp)
         if (data.sheet_history && data.sheet_history.length) {
@@ -1174,10 +1166,6 @@ $(document).ready(function() {
         html += '</div>';
         $('#versionHistoryContent').html(html);
     }
-
-    // History UI removed
-
-
 
     // Update header when file name changes
     $('#fileNameInput').on('input', function() {
@@ -1376,6 +1364,15 @@ $(document).ready(function() {
     background-color: #e9ecef;
 }
 
+/* V2 Specific Styling */
+.card-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.card-header h6 {
+    color: white !important;
+}
 
 @media (max-width: 768px) {
     .card-body {
@@ -1391,7 +1388,7 @@ $(document).ready(function() {
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="versionHistoryModalLabel">Version History</h5>
+                <h5 class="modal-title" id="versionHistoryModalLabel">Version History V2</h5>
                 <button type="button" class="btn-close" onclick="closeVersionHistoryModal()" aria-label="Close"></button>
             </div>
             <div class="modal-body">
@@ -1406,5 +1403,5 @@ $(document).ready(function() {
     </div>
 </div>
 
-{{-- History modal removed --}}
 @endsection
+

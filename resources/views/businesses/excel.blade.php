@@ -1,6 +1,6 @@
 @extends('layouts.theme')
 
-@section('title', 'Excel Preview')
+@section('title', 'Excel Sheet')
 
 @section('content')
 
@@ -10,7 +10,7 @@
 <div class="container-fluid mt-4">
     <div class="card shadow mb-4">
         <div class="card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <h6 class="m-0 font-weight-bold text-primary">Business Data</h6>
+            <h6 class="m-0 font-weight-bold text-primary">File & Sheet Data</h6>
             <div class="d-flex flex-wrap align-items-center gap-2">
                 <!-- File name input and existing file select -->
                 <input type="text" id="fileNameInput" class="form-control form-control-sm w-auto" placeholder="create file">
@@ -119,65 +119,79 @@ $('#existingFileSelect').on('change', function () {
 });
 
 
-    const businesses = @json($businesses);
-    let sheetData = [];
+    // Initialize Luckysheet strictly from backend data (no local defaults)
+    function normalizeSheetForCreate(sheet) {
+        const hasCellData = Array.isArray(sheet.celldata) && sheet.celldata.length > 0;
+        return {
+            id: sheet.id || undefined,
+            name: sheet.name,
+            order: sheet.order ?? 0,
+            status: 1,
+            config: sheet.config || { rowlen: {}, columnlen: {} },
+            ...(hasCellData
+                ? { celldata: sheet.celldata }
+                : { data: Array.isArray(sheet.data) ? sheet.data : (typeof sheet.data === 'string' ? JSON.parse(sheet.data) : []) }
+            )
+        };
+    }
 
-    if (businesses.length > 0) {
-        sheetData = [
-            [{ v: "ID" }, { v: "Name" }, { v: "Industry" }, { v: "Email" }, { v: "Phone" }, { v: "Status" }],
-            ...businesses.map(b => [
-                { v: b.id },
-                { v: b.name },
-                { v: b.industry },
-                { v: b.contact_email },
-                { v: b.phone },
-                { v: b.is_active ? "Active" : "Inactive" }
-            ])
-        ];
-    } else {
-        for (let i = 0; i < 16; i++) {
-            let row = [];
-            for (let j = 0; j < 26; j++) {
-                row.push({ v: "" });
+    function initializeLuckysheetFromServerSheets(serverSheets) {
+        try {
+            if (typeof luckysheet !== 'undefined' && luckysheet.getAllSheets) {
+                luckysheet.destroy();
             }
-            sheetData.push(row);
+            const formatted = (serverSheets || [])
+                .sort((a,b) => (a.order ?? 0) - (b.order ?? 0))
+                .map(normalizeSheetForCreate);
+
+            luckysheet.create({
+                container: 'luckysheet',
+                data: formatted,
+                showinfobar: false,
+                showtoolbar: true,
+                showstatisticBar: false,
+                showSheetBar: true,
+                allowEdit: true,
+                enableAddRow: true,
+                enableAddCol: true,
+                enableContextmenu: true,
+                showGridLines: true
+            });
+        } catch (err) {
+            alert('Failed to initialize Luckysheet: ' + err.message);
         }
     }
 
-    let allSheets = [{
-        name: "Sheet1",
-        data: sheetData,
-        config: {
-            rowlen: Object.fromEntries([...Array(sheetData.length).keys()].map(i => [i, 30])),
-            columnlen: Object.fromEntries([...Array(sheetData[0].length).keys()].map(j => [j, 200]))
-        },
-        order: 0,
-        __isNew: false
-    }];
+    function getPersistedFileId() {
+        // Priority: URL param > localStorage > select value
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromUrl = urlParams.get('file_id');
+        if (fromUrl) return fromUrl;
+        const fromStorage = localStorage.getItem('last_file_id');
+        if (fromStorage) return fromStorage;
+        return $('#existingFileSelect').val() || '';
+    }
 
-    // Fetch saved sheets from DB
-    $.ajax({
-        url: '{{ route("sheets.get") }}',
-        type: 'GET',
-        cache: false,
-        success: function(response) {
-            if (response && response.length > 0) {
-                const savedSheets = response.map(sheet => ({
-                    name: sheet.name,
-                    data: sheet.data,
-                    config: sheet.config,
-                    order: sheet.order,
-                    __isNew: false
-                }));
-                allSheets = [...allSheets, ...savedSheets].sort((a, b) => a.order - b.order);
-            }
-            initializeLuckysheet(allSheets);
-        },
-        error: function(xhr, status, error) {
+    function persistFileId(fileId) {
+        if (fileId) localStorage.setItem('last_file_id', fileId);
+    }
+
+    function fetchAndInitSheets() {
+        const selectedFileId = getPersistedFileId();
+        const url = selectedFileId ? ('{{ route("sheets.get") }}' + '?file_id=' + encodeURIComponent(selectedFileId)) : '{{ route("sheets.get") }}';
+        $.ajax({
+            url: url,
+            type: 'GET',
+            cache: false
+        }).done(function(response) {
+            initializeLuckysheetFromServerSheets(response || []);
+        }).fail(function(xhr, status, error) {
             console.error('Failed to load sheets:', error);
-            initializeLuckysheet(allSheets); // fallback
-        }
-    });
+            initializeLuckysheetFromServerSheets([]);
+        });
+    }
+
+    fetchAndInitSheets();
 
     function initializeLuckysheet(sheets) {
         try {
@@ -325,73 +339,52 @@ $('#existingFileSelect').on('change', function () {
     function saveToDatabase(isAuto = false) {
         try {
             const allSheets = luckysheet.getAllSheets();
-            
-            // Check if there are any new or modified sheets
             const hasChanges = allSheets.some(s => s.__isNew || s.__modified);
-            if (!hasChanges) {
+            if (!hasChanges && !isAuto) {
                 alert("No changes to save.");
                 return;
             }
 
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             const enteredName = $('#fileNameInput').val().trim();
-            const selectedOption = $('#existingFileSelect').find('option:selected');
-            const existingFileId = selectedOption.val();
-            const existingFileName = selectedOption.data('name');
+            const selectedFileId = $('#existingFileSelect').val() || null;
 
-            const fileName = enteredName || existingFileName || `sheets_${timestamp}`;
-
-            const fileData = {
-                name: fileName,
-                type: 'xlsx',
-                sheets: allSheets.map((sheet, index) => ({
-                    name: sheet.name,
-                    data: JSON.stringify(sheet.data),
-                    config: JSON.stringify(sheet.config || {}),
-                    celldata: JSON.stringify(sheet.celldata || []),
-                    order: sheet.order,
-                    id: sheet.id || null
-                }))
+            const payload = {
+                name: enteredName || undefined,
+                file_id: selectedFileId || undefined,
+                sheets: allSheets.map(s => ({
+                    id: s.id || null,
+                    name: s.name,
+                    order: s.order ?? 0,
+                    data: JSON.stringify(s.data || []),
+                    config: JSON.stringify(s.config || {}),
+                    celldata: JSON.stringify(s.celldata || [])
+                })),
+                simple_upsert: true
             };
 
-            if (existingFileId) {
-                fileData.file_id = existingFileId;
-            }
-
-            $.ajax({
+        $.ajax({
                 url: '{{ route("sheets.save") }}',
                 type: 'POST',
-                data: JSON.stringify(fileData),
+                data: JSON.stringify(payload),
                 contentType: 'application/json',
-                headers: {
-                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
-                },
-                success: function(response) {
-                    if (!isAuto) alert('Sheet data saved successfully!');
-                    
-                    // Clear modification flags for all sheets
-                    allSheets.forEach(sheet => {
-                        delete sheet.__isNew;
-                        delete sheet.__modified;
-                    });
-                    
-                    // Update sheet IDs if they were created
-                    if (response.sheets) {
-                        const updatedSheets = luckysheet.getAllSheets().map((sheet, index) => {
-                            if (sheet.__isNew && response.sheets[index]) {
-                                sheet.id = response.sheets[index].id;
-                                delete sheet.__isNew;
-                            }
-                            delete sheet.__modified;
-                            return sheet;
-                        });
-                        // Reinitialize with updated sheet IDs
-                        initializeLuckysheet(updatedSheets);
-                    }
-                },
-                error: function(xhr, status, error) {
-                    alert('Failed to save data: ' + (xhr.responseJSON?.message || error));
+                headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') }
+            }).done(function(response) {
+                if (!isAuto) alert('Data saved successfully!');
+                luckysheet.getAllSheets().forEach(s => { delete s.__isNew; delete s.__modified; });
+            if (response && response.file_id) {
+                // Persist file id to survive reloads
+                persistFileId(String(response.file_id));
+                const url = new URL(window.location.href);
+                url.searchParams.set('file_id', String(response.file_id));
+                window.history.replaceState({}, '', url.toString());
+            }
+                if (response && Array.isArray(response.sheets)) {
+                    initializeLuckysheetFromServerSheets(response.sheets);
+                } else {
+                    fetchAndInitSheets();
                 }
+            }).fail(function(xhr, status, error) {
+                alert('Failed to save data: ' + (xhr.responseJSON?.message || error));
             });
         } catch (err) {
             alert('Save failed: ' + err.message);
@@ -412,7 +405,7 @@ $('#existingFileSelect').on('change', function () {
             XLSX.utils.book_append_sheet(wb, ws, sheet.name || "Sheet");
 
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const fileName = `business-data_${timestamp}`;
+            const fileName = `file-data_${timestamp}`;
 
             if (type === 'csv') {
                 const csv = XLSX.utils.sheet_to_csv(ws);

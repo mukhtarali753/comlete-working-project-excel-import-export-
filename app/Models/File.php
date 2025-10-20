@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class File extends Model
 {
-    protected $fillable = ['name', 'type', 'user_id', 'path', 'extension'];
+    protected $guarded = [];
 
     public function sheets()
     {

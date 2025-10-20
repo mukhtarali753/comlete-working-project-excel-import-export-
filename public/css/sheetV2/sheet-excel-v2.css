@@ -1,0 +1,65 @@
+/* Sheet Excel V2 Styles */
+.card-body {
+    height: 75vh;
+    padding: 0 !important;
+}
+
+#luckysheet-wrapper {
+    height:100%;
+    width: 100%;
+    background-color: #fff;
+}
+
+#luckysheet {
+    height: 100% !important;
+    width: 100% !important;
+}
+
+/* V2 Enhanced styling */
+.sheet-v2-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.sheet-v2-header h6 {
+    color: white !important;
+}
+
+/* Version 2 badge */
+.v2-indicator {
+    background-color: #28a745;
+    color: white;
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.2rem;
+    margin-left: 0.5rem;
+}
+
+/* Enhanced progress bar for V2 */
+.progress-bar-container {
+    padding: 10px 15px;
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    border-bottom: 1px solid #dee2e6;
+}
+
+/* V2 specific toast styling */
+.sheet-toast-v2 {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+    border-radius: 8px;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
