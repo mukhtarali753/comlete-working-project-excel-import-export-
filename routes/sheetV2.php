@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Route;
 
 
 Route::controller(SheetControllerV2::class)->prefix('sheetV2')->name('sheetV2.')->group(function () {
-    Route::get('/excel-preview/{fileId?}', 'index')->name('excel-preview');
+    Route::get('/excel-preview/{fileId?}', 'showSheet')->name('excel-preview');
     Route::post('/save-sheets', 'saveSheets')->name('save');
     Route::post('/import-excel', 'importExcel')->name('import');
     Route::get('/files', 'listFiles')->name('files.list');

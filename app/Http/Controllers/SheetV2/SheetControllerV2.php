@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Http\Controllers\SheetV2;
 use App\Http\Requests\SheetV2\SaveSheetsRequestV2;
 use App\Http\Requests\SheetV2\SheetImportRequestV2;
@@ -24,8 +23,7 @@ use App\Http\Controllers\Controller;
 
 class SheetControllerV2 extends Controller
 {
-
-    public function index($fileId = null)
+    public function showSheet($fileId = null)
     {
         if ($fileId) {
             $file = File::findOrFail($fileId);
@@ -54,39 +52,71 @@ class SheetControllerV2 extends Controller
     }
 
 
+
     public function saveSheets(SaveSheetsRequestV2 $request)
     {
-        return SheetSaveHelperV2::handle($request->validated());
+        $sheets = [];
+
+        foreach ($sheets as $sheet) {
+            if (optional($sheet)['id']) {
+                $sh = Sheet::find($sheet['id']);
+                $sh->update([
+                    'name' => $sheet['name']
+                ]);
+            } else {
+                $sh = Sheet::create([
+                    'name' => $sheet['name'],
+                    'file_id' => $request->file_id ?? null,
+                    'order' => $sheet['order'] ?? 0,
+                    'is_current' => 1,
+                ]);
+            }
+
+            $data = json_decode($sheet['data'] ?? '[]', true);
+            $rows = SheetSaveHelperV2::buildRows($data);
+
+            if (!empty($rows)) {
+                SheetRow::where('sheet_id', $sh->id)->delete();
+
+                foreach ($rows as &$row) {
+                    $row['sheet_id'] = $sh->id;
+                }
+
+                SheetRow::insert($rows);
+            }
+        }
+
+        return SheetSaveHelperV2::handle($request->all());
     }
+
 
 
 
 
     public function deleteSheet($id)
     {
-        $result = SheetDeleteHelperV2::deleteSheet(
-            $id,
-            fn($name) => $this->getBaseName($name),
-            fn($fileId, $baseName, $version) => $this->generateUniqueVersionedName($fileId, $baseName, $version)
-        );
+        $sheet = Sheet::find($id);
 
-        if ($result['success']) {
+        if (!$sheet) {
             return response()->json([
-                'message' => 'Sheet removed in new file version.',
-                'file_id' => $result['file_id'],
-                'version' => $result['version'],
-            ], 200);
+                'message' => 'Sheet not found.'
+            ], 404);
         }
 
+        $sheet->delete();
+
         return response()->json([
-            'message' => 'Failed to delete sheet: ' . $result['error'],
-        ], 500);
+            'message' => 'Sheet deleted successfully.'
+        ], 200);
     }
+
 
     public function importExcel(SheetImportRequestV2 $request)
     {
         return SheetImportHelperV2::handle($request);
     }
+
+
 
     public function export(File $file, $type = 'xlsx')
     {

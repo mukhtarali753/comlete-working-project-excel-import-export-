@@ -14,56 +14,9 @@ class SheetSaveHelperV2
 {
     public static function handle(array $data)
     {
-        // ---------- fast mode (simple upsert) ----------
-        if (!empty($data['simple_upsert']) && (bool)$data['simple_upsert'] === true) {
-            return DB::transaction(function () use ($data) {
-                $file = $data['file_id']
-                    ? File::findOrFail($data['file_id'])
-                    : File::create(['name' => $data['name'], 'user_id' => Auth::id()]);
 
-                $saved = [];
-                foreach ($data['sheets'] as $s) {
-                    $payload = [
-                        'file_id'   => $file->id,
-                        'name'      => $s['name'],
-                        'order'     => $s['order'] ?? 0,
-                        'data'      => json_encode($s['data'] ?? []),
-                        'config'    => json_encode($s['config'] ?? ['rowlen' => [], 'columnlen' => []]),
-                        'celldata'  => json_encode($s['celldata'] ?? []),
-                        'is_current'=> 1,
-                    ];
 
-                    if (!empty($s['id'])) {
-                        $sheet = Sheet::where('id', $s['id'])->where('file_id', $file->id)->first();
-                        if ($sheet) {
-                            $sheet->update($payload);
-                        } else {
-                            $sheet = Sheet::where('file_id', $file->id)->where('name', $s['name'])->first();
-                            $sheet ? $sheet->update($payload) : $sheet = Sheet::create($payload);
-                        }
-                    } else {
-                        $sheet = Sheet::where('file_id', $file->id)->where('name', $s['name'])->first();
-                        $sheet ? $sheet->update($payload) : $sheet = Sheet::create($payload);
-                    }
-
-                    $baseName = self::getBaseName($payload['name']);
-                    Sheet::where('file_id', $file->id)
-                        ->where(function ($q) use ($baseName) {
-                            $q->where('name', $baseName)
-                              ->orWhere('name', 'LIKE', $baseName . '\\_v%');
-                        })
-                        ->where('id', '!=', $sheet->id)
-                        ->update(['is_current' => 0]);
-
-                    $saved[] = SheetShowHelperV2::transformSheet($sheet);
-                }
-
-                usort($saved, fn($a, $b) => ($a['order'] ?? 0) <=> ($b['order'] ?? 0));
-                return response()->json(['file_id' => $file->id, 'sheets' => $saved]);
-            });
-        }
-
-        // ---------- versioned save ----------
+        //v.s----
         return DB::transaction(function () use ($data) {
             $isNewFileCreation = empty($data['file_id']);
             $file = $isNewFileCreation
@@ -116,7 +69,7 @@ class SheetSaveHelperV2
             'name'      => $uniqueName,
             'order'     => $sheetData['order'] ?? $index,
             'version'   => 1,
-            'is_current'=> 1,
+            'is_current' => 1,
         ]);
 
         $rows2D = json_decode($sheetData['data'], true) ?: [];
@@ -171,10 +124,10 @@ class SheetSaveHelperV2
                 'name'      => self::generateUniqueVersionedName($file->id, $baseName, $nextVer),
                 'order'     => $in['order'] ?? $old->order ?? 0,
                 'data'      => json_encode($in['data']  ?? $old->data  ?? []),
-                'config'    => json_encode($in['config']?? $old->config ?? []),
-                'celldata'  => json_encode($in['celldata']??$old->celldata??[]),
+                'config'    => json_encode($in['config'] ?? $old->config ?? []),
+                'celldata'  => json_encode($in['celldata'] ?? $old->celldata ?? []),
                 'version'   => $nextVer,
-                'is_current'=> 1,
+                'is_current' => 1,
             ]);
 
             if (isset($in['data'])) {
@@ -192,6 +145,43 @@ class SheetSaveHelperV2
             }
         }
     }
+
+
+    public static function buildRows(array $data): array
+    {
+        $rows = [];
+        foreach ($data as $rIdx => $row) {
+            if (!is_array($row)) continue;
+
+            $cleanRow = [];
+            $hasContent = false;
+            foreach ($row as $cIdx => $cell) {
+                $v = is_array($cell) && array_key_exists('v', $cell)
+                    ? trim((string)$cell['v'])
+                    : (is_string($cell) ? trim($cell) : '');
+                if ($v !== '') $hasContent = true;
+                $cleanRow[(string)$cIdx] = $v;
+            }
+
+            if ($hasContent || $rIdx === 0) {
+                $rows[] = [
+                    'sheet_data' => json_encode($cleanRow),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+        }
+        return $rows;
+    }
+
+    public static function finalize(array $sheets): array
+    {
+        return [
+            'message' => 'Sheets saved successfully',
+            'count'   => count($sheets),
+        ];
+    }
+
 
     /* ----------------------------------------------------------- */
     private static function processRowChunk(Sheet $sheet, array $rows, int $start): void
@@ -275,7 +265,7 @@ class SheetSaveHelperV2
                             'sheet_row_id'   => $row->id,
                             'sheet_id'       => $sheet->id,
                             'sheet_data'     => is_string($row->sheet_data) ? $row->sheet_data : json_encode($row->sheet_data),
-                            'cell_formatting'=> $row->cell_formatting ? (is_string($row->cell_formatting) ? $row->cell_formatting : json_encode($row->cell_formatting)) : null,
+                            'cell_formatting' => $row->cell_formatting ? (is_string($row->cell_formatting) ? $row->cell_formatting : json_encode($row->cell_formatting)) : null,
                             'version_number' => $sheet->version ?? 1,
                             'created_at'     => $row->updated_at ?? now(),
                         ]);
@@ -332,7 +322,7 @@ class SheetSaveHelperV2
                 'sheet_row_id'   => $r->id,
                 'sheet_id'       => $sheet->id,
                 'sheet_data'     => is_string($r->sheet_data) ? $r->sheet_data : json_encode($r->sheet_data),
-                'cell_formatting'=> $r->cell_formatting ? (is_string($r->cell_formatting) ? $r->cell_formatting : json_encode($r->cell_formatting)) : null,
+                'cell_formatting' => $r->cell_formatting ? (is_string($r->cell_formatting) ? $r->cell_formatting : json_encode($r->cell_formatting)) : null,
                 'version_number' => $next,
                 'created_at'     => $r->updated_at,
             ];

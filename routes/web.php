@@ -177,7 +177,7 @@ Route::prefix('businesses')->middleware(['auth'])->controller(FileController::cl
 });
 
 Route::controller(SheetController::class)->group(function () {
-    Route::get('/excel-preview/{fileId?}', 'index')->name('excel.preview');
+    Route::get('/excel-preview/{fileId?}', 'showSheets')->name('excel.preview');
     Route::post('/save-sheets', 'saveSheets')->name('sheets.save');
     Route::post('/import-excel', 'importExcel')->name('sheets.import');
     Route::get('/sheets/{file}', 'show')->name('sheets.show');
