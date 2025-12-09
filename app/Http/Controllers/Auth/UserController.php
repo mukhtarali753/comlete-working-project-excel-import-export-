@@ -7,11 +7,12 @@ use App\Models\User;
 use App\Providers\RouteServiceProvider;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules;
 
-class RegisteredUserController extends Controller
+class UserController extends Controller
 {
     /**
      * Display the registration view.
@@ -50,5 +51,22 @@ class RegisteredUserController extends Controller
         Auth::login($user);
 
         return redirect(RouteServiceProvider::HOME);
+    }
+
+    /**
+     * Retrieve user data for the authenticated context.
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function getuser(): Collection
+    {
+        $authId = Auth::id();
+
+        return User::when($authId, function ($query, $authId) {
+                return $query->where('id', '!=', $authId);
+            })
+            ->select('id', 'name', 'email')
+            ->orderBy('name')
+            ->get();
     }
 }

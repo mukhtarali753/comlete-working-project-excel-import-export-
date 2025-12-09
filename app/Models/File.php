@@ -17,4 +17,10 @@ class File extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+
+      public function shares()
+    {
+        return $this->hasMany(\App\Models\FileShare::class);
+    }
 }

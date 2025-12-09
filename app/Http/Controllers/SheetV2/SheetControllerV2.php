@@ -1,8 +1,11 @@
 <?php
+
 namespace App\Http\Controllers\SheetV2;
+
 use App\Http\Requests\SheetV2\SaveSheetsRequestV2;
 use App\Http\Requests\SheetV2\SheetImportRequestV2;
 use App\Models\File;
+use App\Models\FileShare;
 use App\Models\Sheet;
 use App\Models\SheetRow;
 use App\Models\SheetRowVersion;
@@ -23,10 +26,15 @@ use App\Http\Controllers\Controller;
 
 class SheetControllerV2 extends Controller
 {
+
+
+
     public function showSheet($fileId = null)
     {
         if ($fileId) {
-            $file = File::findOrFail($fileId);
+            $access = $this->checkFileAccess($fileId);
+            $file = $access['file'];
+            $canEdit = $access['canEdit'];
 
             $sheets = $file->sheets()
                 ->where('is_current', 1)
@@ -42,6 +50,8 @@ class SheetControllerV2 extends Controller
             return view('sheetV2.excel', [
                 'file' => $file,
                 'sheets' => $transformedSheets,
+                'canEdit' => $canEdit,
+                'permission' => $access['permission']
             ]);
         }
 
@@ -55,6 +65,11 @@ class SheetControllerV2 extends Controller
 
     public function saveSheets(SaveSheetsRequestV2 $request)
     {
+       
+        if ($request->file_id) {
+            $this->checkFileAccess($request->file_id, true);
+        }
+
         $sheets = [];
 
         foreach ($sheets as $sheet) {
@@ -103,6 +118,9 @@ class SheetControllerV2 extends Controller
             ], 404);
         }
 
+        // Check if user has edit permission for this file
+        $this->checkFileAccess($sheet->file_id, true);
+
         $sheet->delete();
 
         return response()->json([
@@ -120,6 +138,9 @@ class SheetControllerV2 extends Controller
 
     public function export(File $file, $type = 'xlsx')
     {
+        // Check if user has access to this file
+        $this->checkFileAccess($file->id);
+
         $fileName = $file->name . '.' . $type;
 
         $sheets = $file->sheets()->orderBy('order')->get();
@@ -173,5 +194,35 @@ class SheetControllerV2 extends Controller
     public function getSheetVersionHistory($sheetId)
     {
         return SheetVersionHistoryHelperV2::handle($sheetId);
+    }
+
+
+
+
+    private function checkFileAccess($fileId, $requireEdit = false)
+    {
+        $file = File::findOrFail($fileId);
+
+        
+        if ($file->user_id == Auth::id()) {
+            return ['file' => $file, 'permission' => 'owner', 'canEdit' => true];
+        }
+
+       
+        $share = FileShare::where('file_id', $fileId)
+            ->where('user_id', Auth::id())
+            ->first();
+
+        if (!$share) {
+            abort(403, 'You do not have access to this file');
+        }
+
+        $canEdit = $share->type === 'editor';
+
+        if ($requireEdit && !$canEdit) {
+            abort(403, 'You do not have permission to edit this file');
+        }
+
+        return ['file' => $file, 'permission' => $share->type, 'canEdit' => $canEdit];
     }
 }

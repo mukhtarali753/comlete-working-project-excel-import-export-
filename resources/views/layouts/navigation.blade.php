@@ -97,7 +97,7 @@
                           Files V2  --}}
                           {{-- <span style="background: #28a745; color: white; font-size: 0.7em; padding: 2px 4px; border-radius: 3px; margin-left: 4px;">NEW</span> --}}
                        {{-- </a> --}}
-                 <a href="{{ route('fileV2.index') }}"> Files V2</a>
+                 <a href="{{ route('fileV2.index') }}"> Files</a>
                  </button>
 
                   
@@ -166,7 +166,7 @@
                         onclick="event.preventDefault(); this.closest('form').submit();">Logout</button> --}}
                     <button
                         style="color: white; background-color: black; border: 10px solid white; border-radius: 20px; padding: 4px 12px;"
-                        onclick="event.preventDefault(); this.closest('form').submit();">Logout</button>
+                        onclick="event.preventDefault(); showLogoutModal();">Logout</button>
 
                 </form>
 
@@ -215,8 +215,7 @@
                 <form method="POST" action="{{ route('logout') }}">
                     @csrf
 
-                    <x-responsive-nav-link :href="route('logout')" onclick="event.preventDefault();
-                                        this.closest('form').submit();">
+                    <x-responsive-nav-link :href="route('logout')" onclick="event.preventDefault(); showLogoutModal();">
                         {{ __('Log Out') }}
                     </x-responsive-nav-link>
                 </form>
@@ -224,7 +223,88 @@
         </div>
     </div>
 </nav>
+
+<!-- Logout Confirmation Modal -->
+<div id="logoutModal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
+    <div style="background-color: #fff; 
+                margin: 10% auto; 
+                padding: 20px; 
+                border: 1px solid #ccc; 
+                border-radius: 10px; 
+                width: 320px; 
+                max-width: 90%; 
+                box-shadow: 0 4px 10px rgba(0,0,0,0.15); 
+                text-align: center;">
+        <h3 style="color: #333; margin-bottom: 15px; font-size: 1.3em;">Confirm Logout</h3>
+        <p style="color: #555; margin-bottom: 25px; font-size: 1em;">
+            Are you sure you want to logout, <strong>{{ Auth::user()->name ?? 'Unknown User' }}</strong>?
+        </p>
+        <div style="display: flex; gap: 10px; justify-content: center;">
+            <button id="confirmLogout" style="background-color: #333; color: #fff; border: none; padding: 8px 18px; border-radius: 5px; cursor: pointer; font-size: 0.95em;">
+                Logout
+            </button>
+            <button id="cancelLogout" style="background-color: #6c757d; color: #fff; border: none; padding: 8px 18px; border-radius: 5px; cursor: pointer; font-size: 0.95em;">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
+
+
 <!-- jQuery CDN (if not already loaded in layout) -->
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+<!-- Logout Modal Script -->
+<script>
+function showLogoutModal() {
+    document.getElementById('logoutModal').style.display = 'block';
+}
+
+function hideLogoutModal() {
+    document.getElementById('logoutModal').style.display = 'none';
+}
+
+// Event listeners
+document.getElementById('confirmLogout').addEventListener('click', function() {
+    // Submit the logout form
+    document.querySelector('form[action="{{ route("logout") }}"]').submit();
+});
+
+document.getElementById('cancelLogout').addEventListener('click', function() {
+    hideLogoutModal();
+});
+
+// Close modal when clicking outside of it
+window.addEventListener('click', function(event) {
+    const modal = document.getElementById('logoutModal');
+    if (event.target === modal) {
+        hideLogoutModal();
+    }
+});
+
+// Close modal with Escape key
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        hideLogoutModal();
+    }
+});
+
+// Hover effects for buttons
+document.getElementById('confirmLogout').addEventListener('mouseenter', function() {
+    this.style.backgroundColor = '#c82333';
+});
+
+document.getElementById('confirmLogout').addEventListener('mouseleave', function() {
+    this.style.backgroundColor = '#dc3545';
+});
+
+document.getElementById('cancelLogout').addEventListener('mouseenter', function() {
+    this.style.backgroundColor = '#5a6268';
+});
+
+document.getElementById('cancelLogout').addEventListener('mouseleave', function() {
+    this.style.backgroundColor = '#6c757d';
+});
+</script>
 
 <!-- Script to dynamically add stage rows -->

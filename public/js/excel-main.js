@@ -132,45 +132,57 @@ $(document).ready(function() {
             formattedSheets.push(sheetData);
         });
 
+        // Check if user has edit permissions (set from blade template)
+        var canEdit = (typeof window.CAN_EDIT !== 'undefined') ? window.CAN_EDIT : true;
+        
         luckysheet.destroy();
         luckysheet.create({
             container: 'luckysheet',
             data: formattedSheets,
             showinfobar: false,
-            showtoolbar: true,
+            showtoolbar: canEdit, // Hide toolbar for viewers
             showstatisticBar: false,
             showSheetBar: true,
-            allowEdit: true,
-            allowUpdate: true,
-            enableAddRow: true,
-            enableAddCol: true,
-            enableContextmenu: true,
+            allowEdit: canEdit, // Disable editing for viewers
+            allowUpdate: canEdit, // Disable updates for viewers
+            enableAddRow: canEdit, // Disable adding rows for viewers
+            enableAddCol: canEdit, // Disable adding columns for viewers
+            enableContextmenu: canEdit, // Disable context menu for viewers
             showGridLines: true,
             allowUpdateWhenUnFocused: false,
             enableVersion: (function(){
+                if (!canEdit) return false; // Disable version history for viewers
                 try { return $('#enableVersionHistory').is(':checked'); } catch(e) { return true; }
             })()
         });
 
-        // Add custom context menu for sheet deletion
-        luckysheet.setConfig({
-            hook: {
-                onToggleSheetMenu: function(menu) {
-                    menu.push({
-                        name: "Delete Sheet",
-                        onclick: function() {
-                            const index = luckysheet.getSheetIndex();
-                            deleteSheet(index);
-                        }
-                    });
-                    return menu;
+        // Add custom context menu for sheet deletion (only if user can edit)
+        if (canEdit) {
+            luckysheet.setConfig({
+                hook: {
+                    onToggleSheetMenu: function(menu) {
+                        menu.push({
+                            name: "Delete Sheet",
+                            onclick: function() {
+                                const index = luckysheet.getSheetIndex();
+                                deleteSheet(index);
+                            }
+                        });
+                        return menu;
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     // Function to handle sheet deletion
     function deleteSheet(sheetIndex) {
+        var canEdit = (typeof window.CAN_EDIT !== 'undefined') ? window.CAN_EDIT : true;
+        if (!canEdit) {
+            alert('You do not have permission to delete sheets. You have view-only access.');
+            return;
+        }
+        
         var allSheets = luckysheet.getAllSheets();
         var sheetToDelete = allSheets[sheetIndex];
         
@@ -227,8 +239,13 @@ $(document).ready(function() {
         }, 1500);
     }
 
-    // Add new sheet button handler
+    // Add new sheet button handler (only if user can edit)
     $('#addNewSheetBtn').on('click', function() {
+        var canEdit = (typeof window.CAN_EDIT !== 'undefined') ? window.CAN_EDIT : true;
+        if (!canEdit) {
+            alert('You do not have permission to add sheets. You have view-only access.');
+            return;
+        }
         if (!isLuckysheetReady()) {
             alert('Please wait for the sheet to load completely before adding a new sheet.');
             return;
@@ -403,6 +420,15 @@ $(document).ready(function() {
 
     function saveNow(isAuto) {
         isAuto = isAuto || false;
+        
+        // Check if user has edit permissions
+        var canEdit = (typeof window.CAN_EDIT !== 'undefined') ? window.CAN_EDIT : true;
+        if (!canEdit) {
+            if (!isAuto) {
+                alert('You do not have permission to save changes. You have view-only access.');
+            }
+            return;
+        }
         
         // Show progress indicator for manual saves
         if (!isAuto) {
@@ -593,12 +619,21 @@ $(document).ready(function() {
 
     var autoSaveTimer = null;
     function scheduleAutoSave() {
+        var canEdit = (typeof window.CAN_EDIT !== 'undefined') ? window.CAN_EDIT : true;
+        if (!canEdit) {
+            return; // Don't schedule auto-save for viewers
+        }
         if (autoSaveTimer) clearTimeout(autoSaveTimer);
         autoSaveTimer = setTimeout(function() { saveNow(true); }, 1500);
     }
 
-    // Save data button handler
-    $('#saveSheetBtn').on('click', function() { 
+    // Save data button handler (only if user can edit)
+    $('#saveSheetBtn').on('click', function() {
+        var canEdit = (typeof window.CAN_EDIT !== 'undefined') ? window.CAN_EDIT : true;
+        if (!canEdit) {
+            alert('You do not have permission to save changes. You have view-only access.');
+            return;
+        }
         if (!isLuckysheetReady()) {
             alert('Please wait for the sheet to load completely before saving.');
             return;
@@ -609,65 +644,89 @@ $(document).ready(function() {
     // Function to initialize Luckysheet event handlers
     function initializeLuckysheetEvents() {
         if (isLuckysheetReady() && typeof luckysheet.on === 'function') {
-            var markModified = function(rowIndex) {
-                var allSheets = luckysheet.getAllSheets();
-                var activeSheetIndex = luckysheet.getActiveSheetIndex();
-                var activeSheet = allSheets[activeSheetIndex];
-                
-                // Mark the sheet as modified
-                activeSheet.__modified = true;
-                
-                // Mark the specific row as modified
-                if (!activeSheet.__modifiedRows) {
-                    activeSheet.__modifiedRows = {};
-                }
-                if (rowIndex !== undefined) {
-                    activeSheet.__modifiedRows[rowIndex] = true;
-                }
-                
-                scheduleAutoSave();
-            };
-
-            luckysheet.on('cellEdited', function(payload) {
-                try {
-                    if (payload && payload.r !== undefined) {
-                        markModified(payload.r);
-                        // Log full data to console (not via alert) for debugging
-                        try {
-                            var allSheetsData = luckysheet.getAllSheets();
-                            console.log('Sheet data after edit (V2):', allSheetsData);
-                        } catch (e) {}
-
-                        // Show concise toast for meaningful value changes only
-                        var row = payload.r;
-                        var col = payload.c;
-                        var value = (payload && payload.v !== undefined) ? payload.v : (payload && payload.value !== undefined ? payload.value : '');
-                        if (value !== undefined && value !== null && value !== '') {
-                            var cellRef = columnIndexToLabel(col) + (row + 1);
-                            showToast('Cell ' + cellRef + ' updated to ' + value);
-                        }
-                    } else {
-                        markModified();
-                    }
-                } catch(e) {}
-            });
-            luckysheet.on('updated', function(operate) {
-                try {
-                    markModified();
-                } catch (e) {}
-            });
-            luckysheet.on('cellMousedown', function() {});
+            // Check if user has edit permissions
+            var canEdit = (typeof window.CAN_EDIT !== 'undefined') ? window.CAN_EDIT : true;
             
-            // Hook common toolbar actions that affect formatting via keydown already
-            console.log('Luckysheet V2 events initialized successfully');
+            // Only set up editing events if user can edit
+            if (canEdit) {
+                var markModified = function(rowIndex) {
+                    var allSheets = luckysheet.getAllSheets();
+                    var activeSheetIndex = luckysheet.getActiveSheetIndex();
+                    var activeSheet = allSheets[activeSheetIndex];
+                    
+                    // Mark the sheet as modified
+                    activeSheet.__modified = true;
+                    
+                    // Mark the specific row as modified
+                    if (!activeSheet.__modifiedRows) {
+                        activeSheet.__modifiedRows = {};
+                    }
+                    if (rowIndex !== undefined) {
+                        activeSheet.__modifiedRows[rowIndex] = true;
+                    }
+                    
+                    scheduleAutoSave();
+                };
+
+                luckysheet.on('cellEdited', function(payload) {
+                    try {
+                        if (payload && payload.r !== undefined) {
+                            markModified(payload.r);
+                            // Log full data to console (not via alert) for debugging
+                            try {
+                                var allSheetsData = luckysheet.getAllSheets();
+                                console.log('Sheet data after edit (V2):', allSheetsData);
+                            } catch (e) {}
+
+                            // Show concise toast for meaningful value changes only
+                            var row = payload.r;
+                            var col = payload.c;
+                            var value = (payload && payload.v !== undefined) ? payload.v : (payload && payload.value !== undefined ? payload.value : '');
+                            if (value !== undefined && value !== null && value !== '') {
+                                var cellRef = columnIndexToLabel(col) + (row + 1);
+                                showToast('Cell ' + cellRef + ' updated to ' + value);
+                            }
+                        } else {
+                            markModified();
+                        }
+                    } catch(e) {}
+                });
+                luckysheet.on('updated', function(operate) {
+                    try {
+                        markModified();
+                    } catch (e) {}
+                });
+                luckysheet.on('cellMousedown', function() {});
+                
+                // Hook common toolbar actions that affect formatting via keydown already
+                console.log('Luckysheet V2 events initialized successfully (Edit mode)');
+            } else {
+                console.log('Luckysheet V2 events initialized (View-only mode)');
+                // For viewers, prevent any editing attempts
+                luckysheet.on('cellEditBefore', function() {
+                    return false; // Prevent editing
+                });
+            }
         } else {
             console.log('Luckysheet V2 not ready yet, retrying in 500ms...');
             setTimeout(initializeLuckysheetEvents, 500);
         }
     }
 
-    // Keyboard shortcuts: Ctrl/Cmd+S to save, and autosave on common edit keys
+    // Keyboard shortcuts: Ctrl/Cmd+S to save, and autosave on common edit keys (only if user can edit)
     $(document).on('keydown', function(e) {
+        var canEdit = (typeof window.CAN_EDIT !== 'undefined') ? window.CAN_EDIT : true;
+        if (!canEdit) {
+            // Prevent save shortcuts for viewers
+            var key = (e.key || '').toLowerCase();
+            var ctrl = e.ctrlKey || e.metaKey;
+            if (ctrl && key === 's') {
+                e.preventDefault();
+                return false;
+            }
+            return;
+        }
+        
         var key = (e.key || '').toLowerCase();
         var ctrl = e.ctrlKey || e.metaKey;
         if (ctrl && key === 's') {

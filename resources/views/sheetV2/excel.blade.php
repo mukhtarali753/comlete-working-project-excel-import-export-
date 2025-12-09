@@ -5,7 +5,7 @@
 @section('content')
 <div class="container-fluid mt-4">
     <div class="card shadow mb-4">
-    <div class="card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2" >
+        <div class="card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
             <h6 class="m-0 font-weight-bold text-white" id="fileHeader">
                 @if(isset($file))
                     File Name V2: {{ $file->name ?? 'New Spreadsheet' }}
@@ -13,41 +13,70 @@
                     Import File V2
                 @endif
             </h6>
+
             <div class="d-flex flex-wrap align-items-center gap-2">
-                <input type="text" id="fileNameInput" class="form-control form-control-sm w-auto"
-                       value="{{ $file->name ?? '' }}" placeholder="File name">
+                @if(isset($canEdit) && $canEdit)
+                    <input type="text" id="fileNameInput" class="form-control form-control-sm w-auto"
+                           value="{{ $file->name ?? '' }}" placeholder="File name">
+                @else
+                    <span class="form-control form-control-sm w-auto bg-light" readonly>
+                        {{ $file->name ?? '' }}
+                    </span>
+                @endif
 
-                <div class="form-check form-check-inline align-self-center">
-                    <input class="form-check-input" type="checkbox" id="enableVersionHistory" checked>
-                    <label class="form-check-label" for="enableVersionHistory">
-                        Version History V2 <span id="versionHistoryInfo" class="text-muted">(Auto-disabled for large sheets)</span>
-                    </label>
-                </div>
+                @if(isset($canEdit) && $canEdit)
+                    <div class="form-check form-check-inline align-self-center">
+                        <input class="form-check-input" type="checkbox" id="enableVersionHistory" checked>
+                        <label class="form-check-label" for="enableVersionHistory">
+                            Version History V2 <span id="versionHistoryInfo" class="text-muted">(Auto-disabled for large sheets)</span>
+                        </label>
+                    </div>
+                @endif
 
-                <button id="addNewSheetBtn" class="btn btn-sm btn-warning">
-                    <i class="fas fa-plus-square"></i> Add New Sheet
-                </button>
-                <button id="saveSheetBtn" class="btn btn-sm btn-success">
-                    <i class="fas fa-save"></i> Save Data
-                </button>
-                <button id="versionHistoryBtn" class="btn btn-sm btn-info">
+                @if(isset($canEdit) && $canEdit)
+                    <button id="addNewSheetBtn" class="btn btn-sm btn-warning">
+                        <i class="fas fa-plus-square"></i> Add New Sheet
+                    </button>
+                    <button id="saveSheetBtn" class="btn btn-sm btn-success">
+                        <i class="fas fa-save"></i> Save Data
+                    </button>
+                @endif
+
+                <!-- History and Export Buttons -->
+                @if(isset($canEdit) && $canEdit)
+                <button id="versionHistoryBtn"
+                        class="btn btn-sm btn-info @if(isset($permission) && $permission === 'viewer') disabled opacity-50 @endif"
+                        @if(isset($permission) && $permission === 'viewer') disabled @endif>
                     <i class="fas fa-history"></i> History
                 </button>
-                <button id="exportBtn" class="btn btn-sm btn-primary">
+                    @endif
+                 @if(isset($canEdit) && $canEdit)
+                <button id="exportBtn"
+                        class="btn btn-sm btn-primary @if(isset($permission) && $permission === 'viewer') disabled opacity-50 @endif"
+                        @if(isset($permission) && $permission === 'viewer') disabled @endif>
                     <i class="fas fa-file-export fa-sm"></i> Export
                 </button>
+                @endif
+
+                @if(isset($permission) && $permission !== 'owner')
+                    <span class="badge bg-info ms-2 align-middle d-inline-flex align-items-center px-3 py-2"
+                          style="font-size: 0.875rem; height: 31px;">
+                        <i class=""></i> {{ ucfirst($permission) }} Access
+                    </span>
+                @endif
             </div>
         </div>
 
         <!-- Progress Bar for Save Operations -->
         <div id="saveProgress" class="progress-bar-container" style="display: none;">
             <div class="progress">
-                <div id="saveProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                <div id="saveProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
                      role="progressbar" style="width: 0%"></div>
             </div>
             <small id="saveProgressText" class="text-muted">Preparing to save...</small>
         </div>
 
+        <!-- Luckysheet Container -->
         <div class="card-body p-0 position-relative">
             <div id="luckysheet-wrapper">
                 <div id="luckysheet"></div>
@@ -65,9 +94,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <div id="versionHistoryContent">
-                    
-                </div>
+                <div id="versionHistoryContent"></div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -96,18 +123,19 @@
 
 <script>
 $(document).ready(function() {
-  
     var initialSheets = @json($sheets ?? []);
     var fileId = @json($file->id ?? null);
     var isImporting = @json(!isset($file) ? true : false);
-    
-    // Set global save URL for AJAX calls
-    window.EXCEL_SAVE_URL = '{{ route("sheetV2.save") }}';
-    
+    var canEdit = @json($canEdit ?? true);
+    var permission = @json($permission ?? 'owner');
 
+    // Global vars for JS
+    window.EXCEL_SAVE_URL = '{{ route("sheetV2.save") }}';
+    window.CAN_EDIT = canEdit;
+    window.USER_PERMISSION = permission;
+
+    // Initialize Luckysheet
     initializeExcelV2(initialSheets, fileId, isImporting);
-    
-  
     startLuckysheetInitialization();
 });
 </script>
